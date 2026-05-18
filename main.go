@@ -351,7 +351,7 @@ func handleMCPToolsCall(msg a2a.ACPMessage, myAgentID string, outbound chan []by
 		activeSpans[taskID] = span
 		activeSpansMu.Unlock()
 
-		forward := ACPMessage{
+		forward := a2a.ACPMessage{
 			JSONRPC:   "2.0",
 			Method:    "mcp/tools/call",
 			Sender:    myAgentID,
@@ -367,7 +367,7 @@ func handleMCPToolsCall(msg a2a.ACPMessage, myAgentID string, outbound chan []by
 			log.Printf("[Harness] Failed to forward tool call to %s: agent not reachable", targetAgent)
 		}
 	} else {
-		resp := ACPMessage{
+		resp := a2a.ACPMessage{
 			JSONRPC: "2.0",
 			Method:  "mcp/tools/call/response",
 			Sender:  "harness",
@@ -502,7 +502,7 @@ func handleTasksSendUpdate(msg a2a.ACPMessage) {
 	broadcastWS(updatePayload)
 
 	if requester != "" && requester != msg.Sender {
-		resp := ACPMessage{
+		resp := a2a.ACPMessage{
 			JSONRPC: "2.0",
 			Method:  "tasks/sendUpdate",
 			Sender:  "harness",
@@ -529,7 +529,7 @@ func handleTasksCancel(msg a2a.ACPMessage, outbound chan []byte) {
 		return
 	}
 	if !taskStore.CancelTask(taskID) {
-		resp := ACPMessage{
+		resp := a2a.ACPMessage{
 			JSONRPC: "2.0",
 			Method:  "tasks/cancel/response",
 			Sender:  "harness",
@@ -548,7 +548,7 @@ func handleTasksCancel(msg a2a.ACPMessage, outbound chan []byte) {
 	if ok {
 		targetAgent, _ := sm.Task().Metadata["targetAgent"].(string)
 		if targetAgent != "" && targetAgent != msg.Sender {
-			fwd := ACPMessage{
+			fwd := a2a.ACPMessage{
 				JSONRPC: "2.0",
 				Method:  "tasks/cancel",
 				Sender:  "harness",
@@ -569,7 +569,7 @@ func handleTasksCancel(msg a2a.ACPMessage, outbound chan []byte) {
 		"history":   []a2a.TaskStatus{},
 		"artifacts": []a2a.Artifact{},
 	})
-	resp := ACPMessage{
+	resp := a2a.ACPMessage{
 		JSONRPC: "2.0",
 		Method:  "tasks/cancel/response",
 		Sender:  "harness",
@@ -627,7 +627,7 @@ func handleDiscover(msg a2a.ACPMessage, myAgentID string, outbound chan []byte) 
 		}
 	}
 
-	discResp := ACPMessage{
+	discResp := a2a.ACPMessage{
 		JSONRPC: "2.0",
 		Method:  "discover_response",
 		Sender:  "harness",
