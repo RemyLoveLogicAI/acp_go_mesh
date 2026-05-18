@@ -9,14 +9,25 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+
+	"acp-mesh/pkg/a2a"
 )
 
+// ACPMessage is the legacy wire format.
 type ACPMessage struct {
 	JSONRPC string                 `json:"jsonrpc"`
 	Method  string                 `json:"method"`
 	Sender  string                 `json:"sender"`
 	Target  string                 `json:"target,omitempty"`
 	Params  map[string]interface{} `json:"params,omitempty"`
+}
+
+// taskContext holds everything needed to resume a task after approval.
+type taskContext struct {
+	TaskID    string
+	Command   string
+	Requester string
 }
 
 func main() {
@@ -47,7 +58,7 @@ func main() {
 
 	fmt.Printf("\033[36m[Worker %s]\033[0m Connected to Harness at %s\n", agentID, socketPath)
 
-	// Send Registration / Discovery Manifest
+	// Send Registration + Agent Card (A2A discovery manifest)
 	regMsg := ACPMessage{
 		JSONRPC: "2.0",
 		Method:  "register",
@@ -57,104 +68,205 @@ func main() {
 			"tools": []map[string]interface{}{
 				{"name": "execute_shell", "description": "Execute a shell command on the host"},
 			},
+			"agentCard": a2a.AgentCard{
+				Name:        agentID,
+				Description: "Shell execution worker with approval gating",
+				Version:     "1.0.0",
+				Skills: []a2a.AgentSkill{
+					{ID: "execute_shell", Name: "Shell Execution", Description: "Runs shell commands with user approval", Tags: []string{"shell", "execution"}},
+				},
+				DefaultInputModes:  []string{"text"},
+				DefaultOutputModes: []string{"text"},
+			},
 		},
 	}
 	b, _ := json.Marshal(regMsg)
 	conn.Write(append(b, '\n'))
 
-	var pendingTaskID string
-	var pendingCommand string
-	var pendingRequester string
+	// taskContexts stores pending tasks keyed by taskID.
+	// This replaces the old blocking variables so the worker never pauses.
+	var taskCtxs sync.Map
 
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		line := scanner.Text()
 		var msg ACPMessage
-		if err := json.Unmarshal([]byte(line), &msg); err == nil {
-			
-			if msg.Method == "mcp/tools/call" {
-				toolName, ok := msg.Params["tool_name"].(string)
-				if ok && toolName == "execute_shell" {
-					command, _ := msg.Params["command"].(string)
-					fmt.Printf("\033[36m[Worker %s]\033[0m Received MCP call from %s for %s: %s\n", agentID, msg.Sender, toolName, command)
-					
-					// Store pending command
-					pendingCommand = command
-					pendingRequester = msg.Sender
-					// Just a simple ID for now
-					pendingTaskID = fmt.Sprintf("task_%d", os.Getpid())
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue
+		}
 
-					// Ask UI for approval
-					apprMsg := ACPMessage{
+		switch msg.Method {
+		case "mcp/tools/call":
+			toolName, ok := msg.Params["tool_name"].(string)
+			if ok && toolName == "execute_shell" {
+				command, _ := msg.Params["command"].(string)
+				taskID, _ := msg.Params["task_id"].(string)
+				requester, _ := msg.Params["requester"].(string)
+
+				fmt.Printf("\033[36m[Worker %s]\033[0m Received MCP call (task %s) from %s: %s\n", agentID, taskID, msg.Sender, command)
+
+				// Store context so we can resume after approval
+				taskCtxs.Store(taskID, taskContext{
+					TaskID:    taskID,
+					Command:   command,
+					Requester: requester,
+				})
+
+				// Transition task to input-required (approval needed)
+				// Do NOT block. The worker continues listening.
+				updateMsg := ACPMessage{
+					JSONRPC: "2.0",
+					Method:  "tasks/sendUpdate",
+					Sender:  agentID,
+					Target:  "harness",
+					Params: map[string]interface{}{
+						"task_id": taskID,
+						"status": a2a.TaskStatus{
+							State:     a2a.TaskStateInputRequired,
+							Message:   fmt.Sprintf("Approval required for: %s", command),
+							Timestamp: a2a.NewTaskStatus(a2a.TaskStateInputRequired, "").Timestamp,
+						},
+					},
+				}
+				ub, _ := json.Marshal(updateMsg)
+				conn.Write(append(ub, '\n'))
+
+				fmt.Printf("\033[36m[Worker %s]\033[0m Task %s awaiting approval (input-required). Worker continues listening.\n", agentID, taskID)
+			}
+
+		case "approval_response":
+			taskID, _ := msg.Params["task_id"].(string)
+			approvalStatus, _ := msg.Params["status"].(string)
+
+			val, ok := taskCtxs.Load(taskID)
+			if !ok {
+				fmt.Printf("\033[31m[Worker %s]\033[0m Received approval for unknown task %s\n", agentID, taskID)
+				continue
+			}
+			ctx := val.(taskContext)
+
+			if approvalStatus == "approved" {
+				fmt.Printf("\033[36m[Worker %s]\033[0m Task %s approved. Executing: %s\n", agentID, taskID, ctx.Command)
+
+				// Transition to working
+				workingMsg := ACPMessage{
+					JSONRPC: "2.0",
+					Method:  "tasks/sendUpdate",
+					Sender:  agentID,
+					Target:  "harness",
+					Params: map[string]interface{}{
+						"task_id": taskID,
+						"status": a2a.TaskStatus{
+							State:     a2a.TaskStateWorking,
+							Message:   "Executing shell command",
+							Timestamp: a2a.NewTaskStatus(a2a.TaskStateWorking, "").Timestamp,
+						},
+					},
+				}
+				wb, _ := json.Marshal(workingMsg)
+				conn.Write(append(wb, '\n'))
+
+				// Execute shell command
+				cmd := exec.Command("sh", "-c", ctx.Command)
+				output, err := cmd.CombinedOutput()
+
+				resStatus := a2a.TaskStateCompleted
+				resOutput := string(output)
+				if err != nil {
+					resStatus = a2a.TaskStateFailed
+					resOutput += "\nError: " + err.Error()
+				}
+
+				// Transition to completed or failed
+				finalMsg := ACPMessage{
+					JSONRPC: "2.0",
+					Method:  "tasks/sendUpdate",
+					Sender:  agentID,
+					Target:  "harness",
+					Params: map[string]interface{}{
+						"task_id": taskID,
+						"status": a2a.TaskStatus{
+							State:     resStatus,
+							Message:   "Execution finished",
+							Timestamp: a2a.NewTaskStatus(resStatus, "").Timestamp,
+						},
+						"artifact": a2a.Artifact{
+							Name:  "shell_output",
+							Parts: []a2a.Part{a2a.NewTextPart(resOutput)},
+							Metadata: map[string]interface{}{
+								"exit_ok": err == nil,
+								"command": ctx.Command,
+							},
+						},
+					},
+				}
+				fb, _ := json.Marshal(finalMsg)
+				conn.Write(append(fb, '\n'))
+
+				// Also send MCP response to requester
+				if ctx.Requester != "" {
+					mcpStatus := "success"
+					if resStatus == a2a.TaskStateFailed {
+						mcpStatus = "error"
+					}
+					resp := ACPMessage{
 						JSONRPC: "2.0",
-						Method:  "approval_request",
+						Method:  "mcp/tools/call/response",
 						Sender:  agentID,
-						Target:  "ui_user",
+						Target:  ctx.Requester,
 						Params: map[string]interface{}{
-							"task_id": pendingTaskID,
-							"command": command,
+							"task_id": taskID,
+							"status":  mcpStatus,
+							"result":  resOutput,
 						},
 					}
-					ab, _ := json.Marshal(apprMsg)
-					fmt.Printf("\033[36m[Worker %s]\033[0m Requesting user approval for: %s\n", agentID, command)
-					conn.Write(append(ab, '\n'))
+					rb, _ := json.Marshal(resp)
+					conn.Write(append(rb, '\n'))
 				}
-			} else if msg.Method == "approval_response" {
-				taskID, _ := msg.Params["task_id"].(string)
-				status, _ := msg.Params["status"].(string)
 
-				if taskID == pendingTaskID {
-					if status == "approved" {
-						fmt.Printf("\033[36m[Worker %s]\033[0m Command approved. Executing: %s\n", agentID, pendingCommand)
-						
-						// Execute shell command
-						cmd := exec.Command("sh", "-c", pendingCommand)
-						output, err := cmd.CombinedOutput()
-						
-						resStatus := "success"
-						resOutput := string(output)
-						if err != nil {
-							resStatus = "error"
-							resOutput += "\nError: " + err.Error()
-						}
+				fmt.Printf("\033[36m[Worker %s]\033[0m Task %s finished (%s).\n", agentID, taskID, resStatus)
 
-						resMsg := ACPMessage{
-							JSONRPC: "2.0",
-							Method:  "mcp/tools/call/response",
-							Sender:  agentID,
-							Target:  pendingRequester,
-							Params: map[string]interface{}{
-								"task_id": pendingTaskID,
-								"status": resStatus,
-								"result": resOutput,
-							},
-						}
-						rb, _ := json.Marshal(resMsg)
-						conn.Write(append(rb, '\n'))
+			} else {
+				fmt.Printf("\033[31m[Worker %s]\033[0m Task %s rejected by user.\n", agentID, taskID)
 
-					} else {
-						fmt.Printf("\033[31m[Worker %s]\033[0m Command rejected by user.\n", agentID)
-						resMsg := ACPMessage{
-							JSONRPC: "2.0",
-							Method:  "mcp/tools/call/response",
-							Sender:  agentID,
-							Target:  pendingRequester,
-							Params: map[string]interface{}{
-								"task_id": pendingTaskID,
-								"status": "error",
-								"result": "Execution rejected by user.",
-							},
-						}
-						rb, _ := json.Marshal(resMsg)
-						conn.Write(append(rb, '\n'))
+				// Transition to failed (rejected)
+				rejectMsg := ACPMessage{
+					JSONRPC: "2.0",
+					Method:  "tasks/sendUpdate",
+					Sender:  agentID,
+					Target:  "harness",
+					Params: map[string]interface{}{
+						"task_id": taskID,
+						"status": a2a.TaskStatus{
+							State:     a2a.TaskStateFailed,
+							Message:   "Execution rejected by user",
+							Timestamp: a2a.NewTaskStatus(a2a.TaskStateFailed, "").Timestamp,
+						},
+					},
+				}
+				jb, _ := json.Marshal(rejectMsg)
+				conn.Write(append(jb, '\n'))
+
+				// MCP response to requester
+				if ctx.Requester != "" {
+					resp := ACPMessage{
+						JSONRPC: "2.0",
+						Method:  "mcp/tools/call/response",
+						Sender:  agentID,
+						Target:  ctx.Requester,
+						Params: map[string]interface{}{
+							"task_id": taskID,
+							"status":  "error",
+							"result":  "Execution rejected by user.",
+						},
 					}
-
-					// Clear pending
-					pendingTaskID = ""
-					pendingCommand = ""
-					pendingRequester = ""
+					rb, _ := json.Marshal(resp)
+					conn.Write(append(rb, '\n'))
 				}
 			}
+
+			// Clean up
+			taskCtxs.Delete(taskID)
 		}
 	}
 }

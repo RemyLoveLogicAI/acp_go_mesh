@@ -22,5 +22,6 @@
         "**/.ruby-lsp": true,
         "**/.jj": true,
         "**/.mdocfiles": true
-    }
+    },
+    "specstory.cloudSync.enabled": "never"
 }

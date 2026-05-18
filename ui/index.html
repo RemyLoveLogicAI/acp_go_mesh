@@ -4,207 +4,319 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agent Mesh Command Center</title>
-    
-    <!-- Xterm.js -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-    
-    <!-- vis-network -->
-    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
-
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #1e1e1e; color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
-        h1 { margin-top: 0; color: #5ce1e6; font-size: 1.5em; }
-        .grid-container { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 20px; flex: 1; overflow: hidden; }
-        .panel { background: #252526; border: 1px solid #333; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; }
-        
-        #topology-panel { grid-column: 1 / 2; grid-row: 1 / 2; }
-        #network-graph { flex: 1; border: 1px solid #333; background: #111; border-radius: 6px; }
-        
-        #control-panel { grid-column: 1 / 2; grid-row: 2 / 3; }
-        #logs { flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px; background: #000; padding: 10px; border-radius: 6px; margin-bottom: 10px;}
-        .log-entry { margin-bottom: 4px; border-bottom: 1px dashed #222; padding-bottom: 4px; }
-        
-        #terminal-panel { grid-column: 2 / 3; grid-row: 1 / 3; }
-        #terminal { flex: 1; background: #000; padding: 10px; border-radius: 6px; overflow: hidden;}
-        
-        input[type="text"] { width: calc(100% - 90px); padding: 8px; border: 1px solid #555; background: #333; color: #fff; border-radius: 4px; }
-        button { padding: 8px 16px; background: #5ce1e6; color: #000; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+               background: #1e1e1e; color: #ccc; margin: 0; padding: 12px;
+               display: flex; flex-direction: column; height: 100vh; }
+        h1 { margin: 0 0 10px; color: #5ce1e6; font-size: 1.3em; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+                gap: 12px; flex: 1; overflow: hidden; }
+        .panel { background: #252526; border: 1px solid #333; border-radius: 6px;
+                 padding: 12px; display: flex; flex-direction: column; overflow: hidden; }
+        .panel h2 { margin: 0 0 8px; font-size: .9em; color: #888; text-transform: uppercase;
+                    letter-spacing: .05em; }
+        #topology-panel { grid-column: 1; grid-row: 1; }
+        #network-graph  { flex: 1; background: #111; border-radius: 4px; border: 1px solid #2a2a2a; }
+        #task-panel     { grid-column: 1; grid-row: 2; }
+        #terminal-panel { grid-column: 2; grid-row: 1 / 3; }
+        #terminal       { flex: 1; overflow: hidden; }
+
+        /* ── Task Table ─────────────────────────────────── */
+        #task-list { flex: 1; overflow-y: auto; font-size: 11px; }
+        .task-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px;
+                    border-bottom: 1px solid #2a2a2a; }
+        .task-row:last-child { border-bottom: none; }
+        .task-id   { color: #555; font-family: monospace; min-width: 90px; font-size: 10px; }
+        .task-cmd  { flex: 1; font-family: monospace; color: #ccc; white-space: nowrap;
+                     overflow: hidden; text-overflow: ellipsis; }
+        .task-state { font-size: 10px; padding: 2px 6px; border-radius: 10px;
+                      font-weight: 600; white-space: nowrap; }
+        .state-submitted     { background: #333; color: #888; }
+        .state-working       { background: #1a3a5c; color: #60a5fa; }
+        .state-input-required{ background: #3a2a00; color: #f39c12; }
+        .state-completed     { background: #0f2e1a; color: #4ade80; }
+        .state-failed        { background: #2e0f0f; color: #f87171; }
+        .state-canceled      { background: #2a2a2a; color: #666; }
+        .state-rejected      { background: #2e0f0f; color: #f87171; }
+        .cancel-btn { font-size: 10px; padding: 2px 6px; background: #3a1515;
+                      color: #f87171; border: 1px solid #5a2020; border-radius: 3px;
+                      cursor: pointer; display: none; }
+        .cancel-btn:hover { background: #5a2020; }
+        .cancel-btn.visible { display: inline-block; }
+
+        /* ── Approval Gate ──────────────────────────────── */
+        #approval-section { display: none; margin-bottom: 8px; background: #2a1f00;
+                            padding: 8px 10px; border: 1px solid #f39c12; border-radius: 4px; }
+        #approval-section strong { color: #f39c12; font-size: .85em; }
+        #approval-command { font-family: monospace; font-size: 11px; margin: 4px 0;
+                            color: #ffd; word-break: break-all; }
+        .appr-btns { display: flex; gap: 6px; margin-top: 6px; }
+
+        /* ── Command Input ──────────────────────────────── */
+        .input-row { display: flex; gap: 6px; margin-top: 8px; }
+        .input-row input { flex: 1; padding: 6px 8px; border: 1px solid #444;
+                           background: #1a1a1a; color: #fff; border-radius: 4px; font-size: 12px; }
+        button { padding: 6px 14px; background: #5ce1e6; color: #000; border: none;
+                 border-radius: 4px; font-weight: 600; cursor: pointer; font-size: 12px; }
         button:hover { background: #4bb8bd; }
-        .form-row { display: flex; gap: 10px; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-danger:hover { background: #c0392b; }
+        .btn-success { background: #27ae60; color: #fff; }
+        .btn-success:hover { background: #1e8449; }
+
+        /* ── Log strip (mini, bottom of task panel) ─────── */
+        #log-strip { height: 90px; overflow-y: auto; font-size: 10px; font-family: monospace;
+                     background: #111; border-radius: 3px; padding: 4px 6px;
+                     border: 1px solid #222; margin-top: 8px; }
+        .log-line { color: #666; margin-bottom: 2px; }
+        .log-line.info  { color: #4ade80; }
+        .log-line.warn  { color: #f39c12; }
+        .log-line.error { color: #f87171; }
     </style>
 </head>
 <body>
-    <h1>Go Agent Mesh Command Center</h1>
-    <div class="grid-container">
-        <!-- TOP LEFT: Topology Graph -->
-        <div class="panel" id="topology-panel">
-            <h2 style="margin-top:0; font-size:1.1em;">Mesh Topology</h2>
-            <div id="network-graph"></div>
-        </div>
-        
-        <!-- BOTTOM LEFT: Event Logs & Control -->
-        <div class="panel" id="control-panel">
-            <h2 style="margin-top:0; font-size:1.1em;">ACP Event Trace</h2>
-            <div id="logs"></div>
-            <div id="approval-section" style="display:none; margin-bottom: 10px; background: #331; padding: 10px; border: 1px solid #f39c12; border-radius: 4px;">
-                <strong style="color: #f39c12">Approval Required:</strong>
-                <div id="approval-command" style="font-family: monospace; margin: 5px 0;"></div>
-                <div class="form-row">
-                    <button id="approve-btn" style="background: #27ae60; color: white;">Approve</button>
-                    <button id="reject-btn" style="background: #e74c3c; color: white;">Reject</button>
-                </div>
-            </div>
-            <div class="form-row">
-                <input type="text" id="command-input" placeholder="e.g. List files in the current directory" />
-                <button id="send-btn">Inject</button>
-            </div>
-        </div>
+<h1>Go Agent Mesh — Command Center
+  <span style="font-size:.65em; font-weight:400; color:#555; margin-left:12px;">
+    Wave 1: A2A Task State Machine · Agent Cards · Capability Routing
+  </span>
+</h1>
 
-        <!-- RIGHT: Terminal Stream -->
-        <div class="panel" id="terminal-panel">
-            <h2 style="margin-top:0; font-size:1.1em;">Multiplexed PTY Stream</h2>
-            <div id="terminal"></div>
-        </div>
+<div class="grid">
+
+  <!-- TOP LEFT: Topology -->
+  <div class="panel" id="topology-panel">
+    <h2>Mesh Topology</h2>
+    <div id="network-graph"></div>
+  </div>
+
+  <!-- BOTTOM LEFT: Tasks + Log + Control -->
+  <div class="panel" id="task-panel">
+    <h2>Task State Machine</h2>
+    <div id="task-list"></div>
+
+    <div id="approval-section">
+      <strong>&#x26A0; Approval Required</strong>
+      <div id="approval-command"></div>
+      <div class="appr-btns">
+        <button class="btn-success" id="approve-btn">Approve</button>
+        <button class="btn-danger"  id="reject-btn">Reject</button>
+      </div>
     </div>
 
-    <script>
-        // Setup Xterm
-        const term = new Terminal({ theme: { background: '#000' } });
-        const fitAddon = new FitAddon.FitAddon();
-        term.loadAddon(fitAddon);
-        term.open(document.getElementById('terminal'));
-        fitAddon.fit();
-        window.onresize = () => fitAddon.fit();
-        term.writeln('\\x1b[32m[System]\\x1b[0m Terminal Ready.');
+    <div id="log-strip"></div>
 
-        // Setup vis-network
-        const nodes = new vis.DataSet([{ id: 'harness', label: 'Harness Router', color: '#e74c3c' }]);
-        const edges = new vis.DataSet([]);
-        const container = document.getElementById('network-graph');
-        const data = { nodes: nodes, edges: edges };
-        const options = {
-            nodes: { shape: 'dot', size: 20, font: { color: '#fff' }, borderWidth: 2 },
-            edges: { color: '#888', arrows: 'to' },
-            physics: { barnesHut: { gravitationalConstant: -2000, centralGravity: 0.3, springLength: 95 } }
-        };
-        const network = new vis.Network(container, data, options);
+    <div class="input-row">
+      <input type="text" id="command-input" placeholder="e.g. ls -la /tmp" />
+      <button id="send-btn">Inject</button>
+    </div>
+  </div>
 
-        // Setup WebSocket
-        const ws = new WebSocket("ws://" + location.host + "/ws");
-        const logsDiv = document.getElementById('logs');
-        let activeAgents = {};
-        let pendingApprovalTaskId = null;
-        let pendingApprovalSender = null;
+  <!-- RIGHT: Terminal (full height) -->
+  <div class="panel" id="terminal-panel">
+    <h2>Multiplexed PTY Stream</h2>
+    <div id="terminal"></div>
+  </div>
 
-        function appendLog(color, source, message) {
-            const el = document.createElement('div');
-            el.className = 'log-entry';
-            const time = new Date().toLocaleTimeString();
-            el.innerHTML = `[${time}] <strong style="color:${color}">[${source}]</strong> ${message}`;
-            logsDiv.appendChild(el);
-            logsDiv.scrollTop = logsDiv.scrollHeight;
-        }
+</div>
 
-        function updateTopology() {
-            // Remove old nodes (except harness)
-            const nodeIds = nodes.getIds().filter(id => id !== 'harness');
-            nodes.remove(nodeIds);
-            edges.clear();
+<script>
+// ── Terminal ──────────────────────────────────────────────────────────────────
+const term = new Terminal({ theme: { background: '#000' }, fontSize: 12 });
+const fitAddon = new FitAddon.FitAddon();
+term.loadAddon(fitAddon);
+term.open(document.getElementById('terminal'));
+fitAddon.fit();
+window.onresize = () => fitAddon.fit();
+term.writeln('\x1b[32m[System]\x1b[0m Terminal ready.');
 
-            for (const [id, info] of Object.entries(activeAgents)) {
-                let capsStr = info.capabilities ? info.capabilities.join(',') : '';
-                let toolsStr = info.tools && info.tools.length > 0 ? '\nTools: ' + info.tools.join(',') : '';
-                nodes.add({ id: id, label: `${id}\n[${capsStr}]${toolsStr}`, color: '#5ce1e6' });
-                edges.add({ from: id, to: 'harness' });
-            }
-        }
+// ── Topology graph ────────────────────────────────────────────────────────────
+const nodes = new vis.DataSet([{ id: 'harness', label: 'Harness\n[router]', color: '#e74c3c', shape: 'diamond', size: 22 }]);
+const edges = new vis.DataSet([]);
+const network = new vis.Network(
+  document.getElementById('network-graph'),
+  { nodes, edges },
+  {
+    nodes: { font: { color: '#fff', size: 11 }, borderWidth: 2 },
+    edges: { color: '#888', arrows: 'to' },
+    physics: { barnesHut: { gravitationalConstant: -3000, centralGravity: 0.3, springLength: 90 } }
+  }
+);
 
-        ws.onmessage = (e) => {
-            const msg = JSON.parse(e.data);
-            if (msg.type === "state_update") {
-                activeAgents = msg.agents;
-                updateTopology();
-                appendLog('#4ade80', 'Harness', 'Topology graph updated.');
-            } else if (msg.type === "acp_trace") {
-                const trace = msg.data;
-                appendLog('#60a5fa', 'ACP', `${trace.sender} \u2192 ${trace.target || '*'}: <strong>${trace.method}</strong>`);
-                
-                // Show trace on graph
-                if (trace.target && nodes.get(trace.target) && nodes.get(trace.sender)) {
-                    const edgeId = trace.sender + '-' + trace.target;
-                    try {
-                        edges.add({ id: edgeId, from: trace.sender, to: trace.target, color: { color: '#f39c12' }, dashes: true });
-                        setTimeout(() => edges.remove(edgeId), 1000);
-                    } catch(e) {}
-                }
+// ── State ─────────────────────────────────────────────────────────────────────
+let activeAgents = {};
+let tasks = {};
+let pendingApprovalTaskId = null;
+let pendingApprovalSender = null;
 
-                // Handle approval request
-                if (trace.method === "approval_request" && trace.target === "ui_user") {
-                    pendingApprovalTaskId = trace.params.task_id;
-                    pendingApprovalSender = trace.sender;
-                    document.getElementById('approval-command').innerText = trace.params.command;
-                    document.getElementById('approval-section').style.display = 'block';
-                }
-            } else if (msg.type === "pty_stream") {
-                term.write(msg.data);
-            } else if (msg.type === "log") {
-                appendLog('#f1c40f', msg.source, msg.message);
-            }
-        };
+// ── Log strip ─────────────────────────────────────────────────────────────────
+function logStrip(msg, level = '') {
+  const el = document.createElement('div');
+  el.className = 'log-line ' + level;
+  el.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+  const strip = document.getElementById('log-strip');
+  strip.appendChild(el);
+  strip.scrollTop = strip.scrollHeight;
+}
 
-        ws.onopen = () => appendLog('#4ade80', 'System', 'WebSocket connected.');
+// ── Task list ─────────────────────────────────────────────────────────────────
+const STATE_ACTIVE = new Set(['submitted', 'working', 'input-required']);
 
-        // Input Handling
-        document.getElementById('approve-btn').onclick = () => {
-            if (pendingApprovalTaskId && ws.readyState === WebSocket.OPEN) {
-                const acpMsg = {
-                    jsonrpc: "2.0",
-                    method: "approval_response",
-                    sender: "ui_user",
-                    target: pendingApprovalSender,
-                    params: { task_id: pendingApprovalTaskId, status: "approved" }
-                };
-                ws.send(JSON.stringify(acpMsg));
-                document.getElementById('approval-section').style.display = 'none';
-            }
-        };
+function stateClass(s) {
+  return 'task-state state-' + s.replace(/[^a-z-]/g, '');
+}
 
-        document.getElementById('reject-btn').onclick = () => {
-            if (pendingApprovalTaskId && ws.readyState === WebSocket.OPEN) {
-                const acpMsg = {
-                    jsonrpc: "2.0",
-                    method: "approval_response",
-                    sender: "ui_user",
-                    target: pendingApprovalSender,
-                    params: { task_id: pendingApprovalTaskId, status: "rejected" }
-                };
-                ws.send(JSON.stringify(acpMsg));
-                document.getElementById('approval-section').style.display = 'none';
-            }
-        };
+function renderTasks() {
+  const list = document.getElementById('task-list');
+  list.innerHTML = '';
+  const sorted = Object.values(tasks).sort((a, b) =>
+    new Date(b.created_at) - new Date(a.created_at));
+  sorted.forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'task-row';
+    row.id = 'task-' + t.id;
 
-        document.getElementById('send-btn').onclick = () => {
-            const input = document.getElementById('command-input');
-            const text = input.value.trim();
-            if (text && ws.readyState === WebSocket.OPEN) {
-                // Send a user intent directly to the manager
-                const acpMsg = {
-                    jsonrpc: "2.0",
-                    method: "user_intent",
-                    sender: "ui_user",
-                    target: "manager", // assumes the orchestrator is named 'manager'
-                    params: { command: text }
-                };
-                ws.send(JSON.stringify(acpMsg));
-                appendLog('#e74c3c', 'UI', `Injected command: ${text}`);
-                input.value = '';
-            }
-        };
-        document.getElementById('command-input').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') document.getElementById('send-btn').click();
-        });
-    </script>
+    const idEl = document.createElement('span');
+    idEl.className = 'task-id';
+    idEl.textContent = t.id.replace('task-', '').slice(-8);
+    idEl.title = t.id;
+
+    const cmdEl = document.createElement('span');
+    cmdEl.className = 'task-cmd';
+    cmdEl.textContent = t.command || '—';
+    cmdEl.title = t.command || '';
+
+    const stateEl = document.createElement('span');
+    stateEl.className = stateClass(t.state);
+    stateEl.textContent = t.state;
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'cancel-btn' + (STATE_ACTIVE.has(t.state) ? ' visible' : '');
+    cancelBtn.textContent = '✕';
+    cancelBtn.title = 'Cancel task';
+    cancelBtn.onclick = () => cancelTask(t.id);
+
+    row.appendChild(idEl);
+    row.appendChild(cmdEl);
+    row.appendChild(stateEl);
+    row.appendChild(cancelBtn);
+    list.appendChild(row);
+  });
+}
+
+function cancelTask(taskID) {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({
+    jsonrpc: '2.0', method: 'cancel_task',
+    sender: 'ui_user', task_id: taskID,
+    params: { task_id: taskID }
+  }));
+  logStrip('Canceled task ' + taskID.slice(-8), 'warn');
+}
+
+// ── Topology update ───────────────────────────────────────────────────────────
+function updateTopology(agentCards) {
+  const ids = nodes.getIds().filter(id => id !== 'harness');
+  nodes.remove(ids);
+  edges.clear();
+  for (const [id, card] of Object.entries(agentCards || activeAgents)) {
+    const skills = card.skills ? card.skills.map(s => s.id).join(',') : id;
+    nodes.add({ id, label: id + '\n[' + skills + ']', color: '#5ce1e6' });
+    edges.add({ from: id, to: 'harness' });
+  }
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+const ws = new WebSocket('ws://' + location.host + '/ws');
+
+ws.onopen = () => logStrip('WebSocket connected.', 'info');
+
+ws.onmessage = e => {
+  const msg = JSON.parse(e.data);
+
+  if (msg.type === 'state_update') {
+    activeAgents = msg.agents || {};
+    updateTopology(msg.agent_cards || {});
+    logStrip('Topology updated — ' + Object.keys(activeAgents).length + ' agent(s).', 'info');
+
+  } else if (msg.type === 'task_list') {
+    (msg.tasks || []).forEach(t => { tasks[t.id] = t; });
+    renderTasks();
+
+  } else if (msg.type === 'task_update') {
+    tasks[msg.task.id] = msg.task;
+    renderTasks();
+    logStrip('Task ' + msg.task.id.slice(-8) + ' → ' + msg.task.state,
+             msg.task.state === 'completed' ? 'info' :
+             msg.task.state === 'failed'    ? 'error' : '');
+
+  } else if (msg.type === 'acp_trace') {
+    const t = msg.data;
+    logStrip(t.sender + ' → ' + (t.target || '*') + ': ' + t.method);
+
+    // Animate edge on graph.
+    if (t.target && nodes.get(t.target) && nodes.get(t.sender)) {
+      const eid = t.sender + '-' + t.target + '-' + Date.now();
+      try {
+        edges.add({ id: eid, from: t.sender, to: t.target,
+                    color: { color: '#f39c12' }, dashes: true });
+        setTimeout(() => edges.remove(eid), 900);
+      } catch(ex) {}
+    }
+
+    // Show approval gate.
+    if (t.method === 'approval_request' && t.target === 'ui_user') {
+      pendingApprovalTaskId = t.params.task_id;
+      pendingApprovalSender = t.sender;
+      document.getElementById('approval-command').textContent = t.params.command;
+      document.getElementById('approval-section').style.display = 'block';
+    }
+
+  } else if (msg.type === 'pty_stream') {
+    term.write(msg.data);
+
+  } else if (msg.type === 'log') {
+    logStrip('[' + msg.source + '] ' + msg.message,
+             msg.message.includes('Warning') ? 'warn' : '');
+  }
+};
+
+// ── Approval buttons ──────────────────────────────────────────────────────────
+function sendApproval(status) {
+  if (!pendingApprovalTaskId || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({
+    jsonrpc: '2.0', method: 'approval_response', sender: 'ui_user',
+    target: pendingApprovalSender,
+    task_id: pendingApprovalTaskId,
+    params: { task_id: pendingApprovalTaskId, status }
+  }));
+  document.getElementById('approval-section').style.display = 'none';
+  pendingApprovalTaskId = null;
+  pendingApprovalSender = null;
+}
+document.getElementById('approve-btn').onclick = () => sendApproval('approved');
+document.getElementById('reject-btn').onclick  = () => sendApproval('rejected');
+
+// ── Command injection ─────────────────────────────────────────────────────────
+document.getElementById('send-btn').onclick = () => {
+  const input = document.getElementById('command-input');
+  const text = input.value.trim();
+  if (!text || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({
+    jsonrpc: '2.0', method: 'user_intent',
+    sender: 'ui_user', target: 'manager',
+    params: { command: text }
+  }));
+  logStrip('Injected: ' + text);
+  input.value = '';
+};
+document.getElementById('command-input').addEventListener('keypress', e => {
+  if (e.key === 'Enter') document.getElementById('send-btn').click();
+});
+</script>
 </body>
 </html>
