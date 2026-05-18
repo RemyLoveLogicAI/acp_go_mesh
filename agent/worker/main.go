@@ -17,14 +17,16 @@ import (
 	"acp-mesh/pkg/a2a"
 )
 
-// A2AEnvelope is the A2A wire format for agent communication.
-type A2AEnvelope struct {
-	JSONRPC string          `json:"jsonrpc"`
-	Method  string          `json:"method"`
-	Sender  string          `json:"sender"`
-	Target  string          `json:"target,omitempty"`
-	TaskID  string          `json:"taskId,omitempty"`
-	Payload json.RawMessage `json:"payload,omitempty"`
+type ACPMessage = a2a.ACPMessage
+type A2AEnvelope = a2a.A2AEnvelope
+
+func getEnvelopeParams(msg A2AEnvelope) map[string]interface{} {
+	params := make(map[string]interface{})
+	if len(msg.Payload) == 0 {
+		return params
+	}
+	_ = json.Unmarshal(msg.Payload, &params)
+	return params
 }
 
 // taskContext holds everything needed to resume a task after approval.
@@ -99,10 +101,12 @@ func main() {
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		line := scanner.Text()
-		var msg ACPMessage
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		var env A2AEnvelope
+		if err := json.Unmarshal([]byte(line), &env); err != nil {
 			continue
 		}
+		// Convert A2AEnvelope to ACPMessage to access Params and SessionID
+		msg := env.ToACPMessage()
 
 		switch msg.Method {
 		case "mcp/tools/call":

@@ -162,12 +162,58 @@ type AgentCard struct {
 // A2AEnvelope wraps any A2A message for transport over the existing UDS/WS wire.
 // This lets us keep the JSON-RPC-like framing while upgrading the payload to A2A semantics.
 type A2AEnvelope struct {
-	JSONRPC string          `json:"jsonrpc"`
-	Method  string          `json:"method"`
-	Sender  string          `json:"sender"`
-	Target  string          `json:"target,omitempty"`
-	TaskID  string          `json:"taskId,omitempty"`
-	Payload json.RawMessage `json:"payload,omitempty"`
+	JSONRPC   string          `json:"jsonrpc"`
+	ID        string          `json:"id,omitempty"`
+	Method    string          `json:"method"`
+	Sender    string          `json:"sender"`
+	Target    string          `json:"target,omitempty"`
+	TaskID    string          `json:"taskId,omitempty"`
+	SessionID string          `json:"sessionId,omitempty"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
+}
+
+// ToA2AEnvelope converts legacy ACPMessage to A2AEnvelope format.
+func (msg ACPMessage) ToA2AEnvelope() A2AEnvelope {
+	env := A2AEnvelope{
+		JSONRPC:   msg.JSONRPC,
+		ID:        msg.ID,
+		Method:    msg.Method,
+		Sender:    msg.Sender,
+		Target:    msg.Target,
+		TaskID:    msg.TaskID,
+		SessionID: msg.SessionID,
+	}
+
+	// Convert Params to Payload if present
+	if len(msg.Params) > 0 {
+		if b, err := json.Marshal(msg.Params); err == nil {
+			env.Payload = b
+		}
+	}
+
+	return env
+}
+
+// ToACPMessage converts A2AEnvelope to legacy ACPMessage format.
+func (env A2AEnvelope) ToACPMessage() ACPMessage {
+	msg := ACPMessage{
+		JSONRPC: env.JSONRPC,
+		ID:      env.ID,
+		Method:  env.Method,
+		Sender:  env.Sender,
+		Target:  env.Target,
+		TaskID:  env.TaskID,
+	}
+
+	// Convert Payload to Params if present
+	if len(env.Payload) > 0 {
+		var params map[string]interface{}
+		if err := json.Unmarshal(env.Payload, &params); err == nil {
+			msg.Params = params
+		}
+	}
+
+	return msg
 }
 
 // Helper constructors

@@ -8,17 +8,13 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"acp-mesh/pkg/a2a"
 )
 
-// ACPMessage is a simplified message struct for smoke testing.
-type ACPMessage struct {
-	JSONRPC   string                 `json:"jsonrpc"`
-	Method    string                 `json:"method"`
-	Sender    string                 `json:"sender"`
-	Target    string                 `json:"target,omitempty"`
-	SessionID string                 `json:"session_id,omitempty"`
-	Params    map[string]interface{} `json:"params,omitempty"`
-}
+// Type aliases for A2A migration
+type ACPMessage = a2a.ACPMessage
+type A2AEnvelope = a2a.A2AEnvelope
 
 func main() {
 	sessionID := "smoke_test_session"
@@ -42,18 +38,24 @@ func main() {
 	// Send user_intent via WebSocket simulation (using HTTP for now)
 	fmt.Println("1. Sending user_intent to harness via HTTP...")
 
-	userIntent := map[string]interface{}{
-		"jsonrpc":    "2.0",
-		"method":     "user_intent",
-		"sender":     "ui_user",
-		"target":     "manager",
+	// Create A2AEnvelope for user_intent
+	userIntentEnv := A2AEnvelope{
+		JSONRPC: "2.0",
+		Method:  "user_intent",
+		Sender:  "ui_user",
+		Target:  "manager",
+		TaskID:  "",
+	}
+	// Set payload with session_id and command
+	payload := map[string]interface{}{
 		"session_id": sessionID,
-		"params": map[string]interface{}{
-			"command": "echo 'hello from smoke test'",
-		},
+		"command":    "echo 'hello from smoke test'",
+	}
+	if b, err := json.Marshal(payload); err == nil {
+		userIntentEnv.Payload = b
 	}
 
-	jsonData, _ := json.Marshal(userIntent)
+	jsonData, _ := json.Marshal(userIntentEnv)
 	resp, err = http.Post("http://localhost:8080/api/message", "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		fmt.Printf("Failed to send user_intent: %v\n", err)
@@ -66,18 +68,24 @@ func main() {
 	// Simulate approval response
 	fmt.Println("2. Simulating approval_response...")
 
-	approval := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"method":  "approval_response",
-		"sender":  "ui_user",
-		"target":  "harness",
-		"params": map[string]interface{}{
-			"task_id": "",
-			"status":  "approved",
-		},
+	// Create A2AEnvelope for approval_response
+	approvalEnv := A2AEnvelope{
+		JSONRPC: "2.0",
+		Method:  "approval_response",
+		Sender:  "ui_user",
+		Target:  "harness",
+		TaskID:  "",
+	}
+	// Set payload with task_id and status
+	approvalPayload := map[string]interface{}{
+		"task_id": "",
+		"status":  "approved",
+	}
+	if b, err := json.Marshal(approvalPayload); err == nil {
+		approvalEnv.Payload = b
 	}
 
-	jsonData, _ = json.Marshal(approval)
+	jsonData, _ = json.Marshal(approvalEnv)
 	resp, err = http.Post("http://localhost:8080/api/message", "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		fmt.Printf("Failed to send approval: %v\n", err)
