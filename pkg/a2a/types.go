@@ -17,6 +17,7 @@ const (
 	TaskStateInputRequired TaskState = "input-required"
 	TaskStateCompleted     TaskState = "completed"
 	TaskStateFailed        TaskState = "failed"
+	TaskStateCanceling     TaskState = "canceling"
 	TaskStateCanceled      TaskState = "canceled"
 )
 
@@ -58,12 +59,13 @@ type Artifact struct {
 
 // Task is the core A2A work unit.
 type Task struct {
-	ID        string     `json:"id"`
-	SessionID string     `json:"sessionId,omitempty"`
-	Status    TaskStatus `json:"status"`
-	History   []Message  `json:"history,omitempty"`
-	Artifacts []Artifact `json:"artifacts,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	ID          string     `json:"id"`
+	SessionID   string     `json:"sessionId,omitempty"`
+	Status      TaskStatus `json:"status"`
+	History     []Message  `json:"history,omitempty"`
+	Artifacts   []Artifact `json:"artifacts,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	CancelToken string     `json:"cancelToken,omitempty"`
 }
 
 // TaskUpdate is sent when a task's status changes.

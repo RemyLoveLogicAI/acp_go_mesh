@@ -53,6 +53,35 @@ type ACPMessage struct {
 	Params         map[string]interface{} `json:"params,omitempty"`
 }
 
+// MessagePresenter handles transformation of raw wire messages into displayable UI text representations.
+type MessagePresenter struct{}
+
+// Present formats an ACPMessage into its UI display representation (role and text content).
+func (mp MessagePresenter) Present(msg ACPMessage) (role string, textContent string) {
+	role = "agent"
+	if msg.Sender == "ui_user" || msg.Method == "user_intent" {
+		role = "user"
+	}
+
+	if msg.Method == "user_intent" {
+		if cmd, ok := msg.Params["command"].(string); ok {
+			textContent = cmd
+		}
+	} else if msg.Method == "mcp/tools/call" {
+		if toolName, ok := msg.Params["tool_name"].(string); ok {
+			textContent = fmt.Sprintf("Calls tool %s", toolName)
+		}
+	} else if msg.Method == "mcp/tools/call/response" {
+		if result, ok := msg.Params["result"].(string); ok {
+			textContent = result
+		}
+	} else {
+		textContent = fmt.Sprintf("Message Method: %s", msg.Method)
+	}
+	return role, textContent
+}
+
+
 var (
 	// Legacy state for tool routing + capability tracking
 	stateMu       sync.RWMutex
@@ -166,27 +195,7 @@ func recordSessionMessage(msg ACPMessage) {
 	if msg.SessionID == "" {
 		return
 	}
-	role := "agent"
-	if msg.Sender == "ui_user" || msg.Method == "user_intent" {
-		role = "user"
-	}
-	var textContent string
-	if msg.Method == "user_intent" {
-		if cmd, ok := msg.Params["command"].(string); ok {
-			textContent = cmd
-		}
-	} else if msg.Method == "mcp/tools/call" {
-		if toolName, ok := msg.Params["tool_name"].(string); ok {
-			textContent = fmt.Sprintf("Calls tool %s", toolName)
-		}
-	} else if msg.Method == "mcp/tools/call/response" {
-		if result, ok := msg.Params["result"].(string); ok {
-			textContent = result
-		}
-	} else {
-		textContent = fmt.Sprintf("Message Method: %s", msg.Method)
-	}
-
+	role, textContent := MessagePresenter{}.Present(msg)
 	if textContent != "" {
 		a2aMsg := a2a.Message{
 			Role:  role,
@@ -199,8 +208,8 @@ func recordSessionMessage(msg ACPMessage) {
 			"message":    a2aMsg,
 		})
 	}
-
 }
+
 
 func dispatchMessage(msg ACPMessage, rawLine string, conn net.Conn, agentID *string, outbound chan []byte) {
 	myAgentID := *agentID
@@ -212,13 +221,20 @@ func dispatchMessage(msg ACPMessage, rawLine string, conn net.Conn, agentID *str
 		handleMCPToolsList(msg, myAgentID, outbound)
 	case "mcp/tools/call":
 		handleMCPToolsCall(msg, myAgentID, outbound)
+	case "tasks/send":
+		handleTasksSend(msg, rawLine)
 	case "tasks/sendUpdate":
 		handleTasksSendUpdate(msg)
+	case "tasks/cancel":
+		handleTasksCancel(msg, outbound)
+	case "discover":
+		handleDiscover(msg, myAgentID, outbound)
+	case "approval_response":
+		handleApprovalResponse(msg, rawLine)
 	default:
 		handleDefaultRoute(msg, rawLine)
 	}
 }
-
 
 func handleRegister(msg ACPMessage, conn net.Conn, agentID *string, outbound chan []byte) {
 	*agentID = msg.Sender
@@ -370,6 +386,40 @@ func handleMCPToolsCall(msg ACPMessage, myAgentID string, outbound chan []byte) 
 	}
 }
 
+func handleTasksSend(msg ACPMessage, rawLine string) {
+	var task a2a.Task
+	if rawTask, ok := msg.Params["task"].(map[string]interface{}); ok {
+		tb, _ := json.Marshal(rawTask)
+		json.Unmarshal(tb, &task)
+	}
+	if task.ID == "" {
+		task.ID = fmt.Sprintf("task_%s_%d", msg.Sender, time.Now().UnixNano())
+	}
+	if task.Status.State == "" {
+		task.Status = a2a.NewTaskStatus(a2a.TaskStateSubmitted, "Task received via tasks/send")
+	}
+	if task.SessionID == "" && msg.SessionID != "" {
+		task.SessionID = msg.SessionID
+	}
+	sm, err := taskStore.CreateTask(task)
+	if err != nil {
+		log.Printf("[Harness] tasks/send create failed: %v", err)
+		return
+	}
+
+	if msg.Target != "" && msg.Target != "harness" {
+		if !taskStore.SendToAgent(msg.Target, append([]byte(rawLine), '\n')) {
+			log.Printf("[Harness] Failed to forward task to %s: agent not reachable", msg.Target)
+		}
+	}
+
+	broadcastWS(map[string]interface{}{
+		"type":   "task_update",
+		"taskId": task.ID,
+		"status": sm.Task().Status,
+	})
+}
+
 func handleTasksSendUpdate(msg ACPMessage) {
 	taskID, _ := msg.Params["task_id"].(string)
 	rawStatus, ok := msg.Params["status"].(map[string]interface{})
@@ -412,8 +462,6 @@ func handleTasksSendUpdate(msg ACPMessage) {
 		activeSpansMu.Unlock()
 	}
 
-	// Build enriched task update with trace context, artifacts, and history
-	sm, _ = taskStore.GetTask(taskID)
 	task := sm.Task()
 	updatePayload := map[string]interface{}{
 		"type":      "task_update",
@@ -450,6 +498,121 @@ func handleTasksSendUpdate(msg ACPMessage) {
 			log.Printf("[Harness] Failed to forward task update to requester %s", requester)
 		}
 	}
+}
+
+func handleTasksCancel(msg ACPMessage, outbound chan []byte) {
+	taskID, _ := msg.Params["task_id"].(string)
+	if taskID == "" {
+		return
+	}
+	if !taskStore.CancelTask(taskID) {
+		resp := ACPMessage{
+			JSONRPC: "2.0",
+			Method:  "tasks/cancel/response",
+			Sender:  "harness",
+			Target:  msg.Sender,
+			Params: map[string]interface{}{
+				"status": "error",
+				"result": "Task not found or already terminal",
+			},
+		}
+		b, _ := json.Marshal(resp)
+		outbound <- append(b, '\n')
+		return
+	}
+	// Forward cancel to the executing agent
+	sm, ok := taskStore.GetTask(taskID)
+	if ok {
+		targetAgent, _ := sm.Task().Metadata["targetAgent"].(string)
+		if targetAgent != "" && targetAgent != msg.Sender {
+			fwd := ACPMessage{
+				JSONRPC: "2.0",
+				Method:  "tasks/cancel",
+				Sender:  "harness",
+				Target:  targetAgent,
+				Params:  map[string]interface{}{"task_id": taskID},
+			}
+			fb, _ := json.Marshal(fwd)
+			taskStore.SendToAgent(targetAgent, append(fb, '\n'))
+		}
+	}
+	// Notify UI
+	broadcastWS(map[string]interface{}{
+		"type":     "task_update",
+		"taskId":   taskID,
+		"status":   a2a.NewTaskStatus(a2a.TaskStateCanceling, "Cancellation requested"),
+		"traceId":  "",
+		"spanId":   "",
+		"history":  []a2a.TaskStatus{},
+		"artifacts": []a2a.Artifact{},
+	})
+	resp := ACPMessage{
+		JSONRPC: "2.0",
+		Method:  "tasks/cancel/response",
+		Sender:  "harness",
+		Target:  msg.Sender,
+		Params: map[string]interface{}{
+			"status": "success",
+			"result": "Cancellation signaled",
+		},
+	}
+	b, _ := json.Marshal(resp)
+	outbound <- append(b, '\n')
+}
+
+func handleDiscover(msg ACPMessage, myAgentID string, outbound chan []byte) {
+	var required []string
+	if rawSkills, ok := msg.Params["required_skills"].([]interface{}); ok {
+		for _, s := range rawSkills {
+			if sv, ok := s.(string); ok {
+				required = append(required, sv)
+			}
+		}
+	}
+
+	all := taskStore.ListAgentCards()
+	var matched []map[string]interface{}
+	for agentID, card := range all {
+		if agentID == myAgentID {
+			continue
+		}
+		skillIDs := make(map[string]bool)
+		for _, sk := range card.Skills {
+			skillIDs[sk.ID] = true
+		}
+		stateMu.RLock()
+		for _, cap := range capabilities[agentID] {
+			skillIDs[cap] = true
+		}
+		stateMu.RUnlock()
+
+		matches := len(required) == 0
+		if !matches {
+			for _, r := range required {
+				if skillIDs[r] {
+					matches = true
+					break
+				}
+			}
+		}
+		if matches {
+			matched = append(matched, map[string]interface{}{
+				"id":     agentID,
+				"name":   card.Name,
+				"skills": skillIDs,
+			})
+		}
+	}
+
+	discResp := ACPMessage{
+		JSONRPC: "2.0",
+		Method:  "discover_response",
+		Sender:  "harness",
+		Target:  myAgentID,
+		Params:  map[string]interface{}{"agents": matched},
+	}
+	db, _ := json.Marshal(discResp)
+	outbound <- append(db, '\n')
 }
 
 func getApprovalState(msg ACPMessage) (a2a.TaskState, string) {
@@ -629,19 +792,15 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	b, _ := json.Marshal(stateUpdate)
 	conn.WriteMessage(websocket.TextMessage, b)
 
-	// Send active session histories to the client on connect
-	sessions := taskStore.ListSessions()
-	for _, sess := range sessions {
-		for _, msg := range sess.Messages {
-			msgUpdate := map[string]interface{}{
-				"type":       "session_update",
-				"session_id": sess.ID,
-				"message":    msg,
-			}
-			bm, _ := json.Marshal(msgUpdate)
+	// Synchronize the last 50 messages of active sessions to the client on connection
+	recentUpdates := taskStore.GetSessionRecentUpdates(50)
+	for _, update := range recentUpdates {
+		bm, err := json.Marshal(update)
+		if err == nil {
 			conn.WriteMessage(websocket.TextMessage, bm)
 		}
 	}
+
 
 	handleWSIncoming(conn)
 

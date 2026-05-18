@@ -15,9 +15,10 @@ type StateMachine struct {
 
 // DefaultTransitions defines the valid A2A state transitions.
 var DefaultTransitions = map[TaskState][]TaskState{
-	TaskStateSubmitted:     {TaskStateWorking, TaskStateInputRequired, TaskStateCanceled},
-	TaskStateWorking:       {TaskStateInputRequired, TaskStateCompleted, TaskStateFailed, TaskStateCanceled},
-	TaskStateInputRequired: {TaskStateWorking, TaskStateCanceled},
+	TaskStateSubmitted:     {TaskStateWorking, TaskStateInputRequired, TaskStateCanceling, TaskStateCanceled},
+	TaskStateWorking:       {TaskStateInputRequired, TaskStateCompleted, TaskStateFailed, TaskStateCanceling, TaskStateCanceled},
+	TaskStateInputRequired: {TaskStateWorking, TaskStateCanceling, TaskStateCanceled},
+	TaskStateCanceling:     {TaskStateCanceled, TaskStateFailed},
 	TaskStateCompleted:     {},
 	TaskStateFailed:        {},
 	TaskStateCanceled:      {},

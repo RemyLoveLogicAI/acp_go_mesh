@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -95,6 +96,8 @@ func main() {
 	// taskContexts stores pending tasks keyed by taskID.
 	// This replaces the old blocking variables so the worker never pauses.
 	var taskCtxs sync.Map
+	// cancelChans stores cancel signal channels keyed by taskID.
+	var cancelChans sync.Map
 
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
@@ -121,6 +124,8 @@ func main() {
 					Requester: requester,
 					SessionID: msg.SessionID,
 				})
+				// Create cancel channel for this task
+				cancelChans.Store(taskID, make(chan struct{}))
 
 				// Transition task to input-required (approval needed)
 				// Do NOT block. The worker continues listening.
@@ -144,6 +149,16 @@ func main() {
 				conn.Write(append(ub, '\n'))
 
 				fmt.Printf("\033[36m[Worker %s]\033[0m Task %s awaiting approval (input-required). Worker continues listening.\n", agentID, taskID)
+			}
+
+		case "tasks/cancel":
+			taskID, _ := msg.Params["task_id"].(string)
+			if taskID == "" {
+				continue
+			}
+			if ch, ok := cancelChans.Load(taskID); ok {
+				close(ch.(chan struct{}))
+				fmt.Printf("\033[36m[Worker %s]\033[0m Cancel signal received for task %s\n", agentID, taskID)
 			}
 
 		case "approval_response":
@@ -179,15 +194,46 @@ func main() {
 				wb, _ := json.Marshal(workingMsg)
 				conn.Write(append(wb, '\n'))
 
-				// Execute shell command
-				cmd := exec.Command("sh", "-c", ctx.Command)
-				output, err := cmd.CombinedOutput()
+				// Execute shell command with cancellation support
+				execCtx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				cmd := exec.CommandContext(execCtx, "sh", "-c", ctx.Command)
+				cancelCh, hasCancel := cancelChans.Load(taskID)
 
-				resStatus := a2a.TaskStateCompleted
-				resOutput := string(output)
-				if err != nil {
+				var resStatus a2a.TaskState
+				var resOutput string
+
+				// Start command
+				if err := cmd.Start(); err != nil {
 					resStatus = a2a.TaskStateFailed
-					resOutput += "\nError: " + err.Error()
+					resOutput = "Error starting command: " + err.Error()
+				} else {
+					// Watch for cancel signal in a goroutine
+					if hasCancel {
+						go func() {
+							select {
+							case <-cancelCh.(chan struct{}):
+								cmd.Process.Kill()
+								cancel()
+							case <-execCtx.Done():
+							}
+						}()
+					}
+
+					// Wait for command to finish
+					err := cmd.Wait()
+					output, _ := cmd.CombinedOutput()
+					resStatus = a2a.TaskStateCompleted
+					resOutput = string(output)
+					if err != nil {
+						if execCtx.Err() == context.Canceled {
+							resStatus = a2a.TaskStateCanceled
+							resOutput += "\n(Canceled by user)"
+						} else {
+							resStatus = a2a.TaskStateFailed
+							resOutput += "\nError: " + err.Error()
+						}
+					}
 				}
 
 				// Transition to completed or failed

@@ -20,6 +20,7 @@ type TaskStore struct {
 	sessions    map[string]*a2a.Session        // sessionID -> session
 	skillRR     map[string]int                   // skillID -> round-robin index
 	skillsIndex map[string][]string            // skillID -> list of agentIDs
+	cancelChans map[string]chan struct{}     // taskID -> cancel signal channel
 }
 // NewTaskStore creates an empty task store.
 func NewTaskStore() *TaskStore {
@@ -31,6 +32,7 @@ func NewTaskStore() *TaskStore {
 		sessions:    make(map[string]*a2a.Session),
 		skillRR:     make(map[string]int),
 		skillsIndex: make(map[string][]string),
+		cancelChans: make(map[string]chan struct{}),
 	}
 }
 
@@ -77,16 +79,23 @@ func (ts *TaskStore) GetAgentCard(agentID string) (a2a.AgentCard, bool) {
 }
 
 // FindAgentBySkill resolves an agent ID that supports the requested skill ID.
-// Performs a high-performance O(1) index lookup.
+// Performs a high-performance O(1) index lookup with thread-safe round-robin load balancing.
 func (ts *TaskStore) FindAgentBySkill(skillID string) (string, bool) {
-	ts.mu.RLock()
-	defer ts.mu.RUnlock()
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
 	list, ok := ts.skillsIndex[skillID]
-	if ok && len(list) > 0 {
-		return list[0], true
+	if !ok || len(list) == 0 {
+		return "", false
 	}
-	return "", false
+	idx := ts.skillRR[skillID]
+	if idx >= len(list) {
+		idx = 0
+	}
+	agentID := list[idx]
+	ts.skillRR[skillID] = (idx + 1) % len(list)
+	return agentID, true
 }
+
 
 
 // getOrCreateSessionLocked retrieves an existing session or initializes a new one.
@@ -143,6 +152,34 @@ func (ts *TaskStore) ListSessions() map[string]a2a.Session {
 	return out
 }
 
+// GetSessionRecentUpdates returns the last N messages across all active sessions, formatted as UI update payloads.
+func (ts *TaskStore) GetSessionRecentUpdates(limit int) []map[string]interface{} {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+
+	var updates []map[string]interface{}
+	for _, sess := range ts.sessions {
+		if sess == nil {
+			continue
+		}
+		msgs := sess.Messages
+		start := 0
+		if len(msgs) > limit {
+			start = len(msgs) - limit
+		}
+		for i := start; i < len(msgs); i++ {
+			msg := msgs[i]
+			updates = append(updates, map[string]interface{}{
+				"type":       "session_update",
+				"session_id": sess.ID,
+				"message":    msg,
+			})
+		}
+	}
+	return updates
+}
+
+
 
 
 // ListAgentCards returns all registered agent cards.
@@ -169,7 +206,23 @@ func (ts *TaskStore) UnregisterAgent(agentID string) {
 	defer ts.mu.Unlock()
 	delete(ts.agentConns, agentID)
 	delete(ts.agents, agentID)
+
+	// Clean up skillsIndex mapping for this agent
+	for skillID, list := range ts.skillsIndex {
+		var newList []string
+		for _, aid := range list {
+			if aid != agentID {
+				newList = append(newList, aid)
+			}
+		}
+		if len(newList) == 0 {
+			delete(ts.skillsIndex, skillID)
+		} else {
+			ts.skillsIndex[skillID] = newList
+		}
+	}
 }
+
 
 
 // SendToAgent delivers a raw JSON line to an agent's outbound channel.
@@ -264,15 +317,33 @@ func (ts *TaskStore) Subscribe(taskID string) <-chan a2a.TaskUpdate {
 func (ts *TaskStore) Unsubscribe(taskID string, ch <-chan a2a.TaskUpdate) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	arr := ts.subs[taskID]
+	arr, exists := ts.subs[taskID]
+	if !exists || len(arr) == 0 {
+		return
+	}
+	foundIdx := -1
 	for i, c := range arr {
 		if c == ch {
-			ts.subs[taskID] = append(arr[:i], arr[i+1:]...)
-			close(c)
+			foundIdx = i
 			break
 		}
 	}
+	if foundIdx != -1 {
+		newList := make([]chan a2a.TaskUpdate, 0, len(arr)-1)
+		for i, c := range arr {
+			if i != foundIdx {
+				newList = append(newList, c)
+			}
+		}
+		if len(newList) == 0 {
+			delete(ts.subs, taskID)
+		} else {
+			ts.subs[taskID] = newList
+		}
+		close(arr[foundIdx])
+	}
 }
+
 
 // BroadcastTaskUpdate sends a task update to all subscribers and the original sender/requester.
 func (ts *TaskStore) BroadcastTaskUpdate(update a2a.TaskUpdate, senderAgentID, requesterAgentID string) {
@@ -319,4 +390,39 @@ func (ts *TaskStore) IsTaskTerminal(taskID string) bool {
 		return false
 	}
 	return sm.IsTerminal()
+}
+
+// RegisterCancel creates a cancel channel for a task and returns it.
+func (ts *TaskStore) RegisterCancel(taskID string) chan struct{} {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ch := make(chan struct{})
+	ts.cancelChans[taskID] = ch
+	return ch
+}
+
+// GetCancel returns the cancel channel for a task if it exists.
+func (ts *TaskStore) GetCancel(taskID string) (chan struct{}, bool) {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	ch, ok := ts.cancelChans[taskID]
+	return ch, ok
+}
+
+// CancelTask transitions a task to canceling and signals the cancel channel.
+func (ts *TaskStore) CancelTask(taskID string) bool {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	sm, ok := ts.tasks[taskID]
+	if !ok || sm.IsTerminal() {
+		return false
+	}
+	if err := sm.Transition(a2a.TaskStateCanceling, "Cancellation requested"); err != nil {
+		return false
+	}
+	if ch, ok := ts.cancelChans[taskID]; ok {
+		close(ch)
+		delete(ts.cancelChans, taskID)
+	}
+	return true
 }

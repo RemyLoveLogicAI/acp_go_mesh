@@ -603,13 +603,20 @@
     </header>
 
     <div class="grid-container">
-        <!-- LEFT: Topology & Agent Explorer -->
+        <!-- LEFT: Topology & Agent Explorer & Task Timeline -->
         <div id="left-col">
             <div class="panel" style="flex: 1;">
                 <div class="panel-header">
                     <div class="panel-title">Mesh Topology</div>
                 </div>
                 <div id="network-graph"></div>
+            </div>
+
+            <div class="panel" id="task-timeline-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Task Timeline</div>
+                </div>
+                <div id="task-timeline-container"></div>
             </div>
 
             <!-- Dynamic Agent Details Card -->
@@ -747,6 +754,117 @@
             }
         }
 
+        // Task Timeline rendering
+        const timelineTasks = new Map();
+        const stateSteps = ['submitted', 'working', 'input-required', 'completed', 'failed', 'canceled', 'canceling'];
+
+        function getStateIndex(state) {
+            return stateSteps.indexOf(state);
+        }
+
+        function getStateColor(state) {
+            const colors = {
+                'submitted': '#3b82f6',
+                'working': '#f59e0b',
+                'input-required': '#ef4444',
+                'completed': '#10b981',
+                'failed': '#dc2626',
+                'canceled': '#6b7280',
+                'canceling': '#f59e0b'
+            };
+            return colors[state] || '#94a3b8';
+        }
+
+        function renderTimelineSteps(currentState) {
+            const steps = ['submitted', 'working'];
+            if (currentState === 'input-required') {
+                steps.push('input-required');
+            }
+            steps.push(currentState);
+            const seen = new Set();
+            const uniqueSteps = steps.filter(s => { const ok = !seen.has(s); seen.add(s); return ok; });
+
+            return uniqueSteps.map((step, i) => {
+                const isCurrent = step === currentState;
+                const cls = isCurrent ? 'timeline-step timeline-step-current' : 'timeline-step';
+                const dotColor = getStateColor(step);
+                return `<div class="${cls}"><div class="timeline-step-dot" style="background:${dotColor}"></div><span>${step}</span></div>`;
+            }).join('');
+        }
+
+        function renderTimelineTaskHTML(taskId, status, artifacts, traceId, spanId) {
+            const state = status.state;
+            const message = status.message || '';
+            const time = new Date().toLocaleTimeString();
+            const color = getStateColor(state);
+            const showCancel = (state === 'working' || state === 'input-required');
+            const progressBar = (state === 'working') ? '<div class="progress-bar"><div class="progress-fill" style="width:60%"></div></div>' : '';
+
+            let artifactHtml = '';
+            if (artifacts && artifacts.length > 0) {
+                const art = artifacts[0];
+                let artText = '';
+                if (art.parts && art.parts.length > 0) {
+                    artText = art.parts[0].text || '';
+                }
+                artifactHtml = `
+                    <div class="timeline-artifacts">
+                        <button class="artifact-toggle" onclick="this.nextElementSibling.classList.toggle('open')">Output</button>
+                        <div class="artifact-content">${artText.replace(/</g, '&lt;')}</div>
+                    </div>`;
+            }
+
+            let traceHtml = '';
+            if (traceId) {
+                traceHtml = `<div class="trace-link">Trace: ${traceId.slice(0, 8)}... | Span: ${spanId.slice(0, 8)}...</div>`;
+            }
+
+            return `
+                <div class="timeline-task" id="timeline-task-${taskId}" data-state="${state}">
+                    <div class="timeline-task-header">
+                        <span class="timeline-task-id">${taskId}</span>
+                        <span class="timeline-timestamp">${time}</span>
+                    </div>
+                    <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;">${message}</div>
+                    ${progressBar}
+                    <div class="timeline-steps">
+                        ${renderTimelineSteps(state)}
+                    </div>
+                    ${artifactHtml}
+                    ${traceHtml}
+                    <div class="timeline-actions" id="timeline-actions-${taskId}">
+                        ${showCancel ? `<button class="btn-timeline btn-cancel" onclick="cancelTask('${taskId}')">Cancel</button>` : ''}
+                    </div>
+                </div>`;
+        }
+
+        function updateTimelineTask(taskId, status, artifacts, traceId, spanId) {
+            const container = document.getElementById('task-timeline-container');
+            const existing = document.getElementById(`timeline-task-${taskId}`);
+            const html = renderTimelineTaskHTML(taskId, status, artifacts, traceId, spanId);
+            if (existing) {
+                existing.outerHTML = html;
+            } else {
+                container.insertAdjacentHTML('afterbegin', html);
+            }
+            // Auto-scroll to top on new task
+            container.scrollTop = 0;
+        }
+
+        function cancelTask(taskId) {
+            if (ws.readyState === WebSocket.OPEN) {
+                const acpMsg = {
+                    jsonrpc: "2.0",
+                    method: "tasks/cancel",
+                    sender: "ui_user",
+                    target: "harness",
+                    params: { task_id: taskId }
+                };
+                ws.send(JSON.stringify(acpMsg));
+                appendLog('#f59e0b', 'UI', `Cancel requested for task ${taskId}`);
+            }
+        }
+
         // Click handler to explore Agent Card details
         network.on("click", function(params) {
             if (params.nodes.length > 0) {
@@ -815,6 +933,7 @@
                 const message = status.message || '';
 
                 appendLog('#c084fc', 'A2A', `Task ${taskId}: ${message}`, { state: state });
+                updateTimelineTask(taskId, status, msg.artifacts || [], msg.traceId || '', msg.spanId || '');
 
                 if (state === 'input-required') {
                     pendingApprovalTaskId = taskId;
