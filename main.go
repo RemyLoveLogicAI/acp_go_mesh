@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"acp-mesh/pkg/a2a"
+	a2a "acp-mesh/pkg/a2a"
 	"acp-mesh/pkg/harness"
 )
 
@@ -42,24 +43,11 @@ var (
 	}
 )
 
-// ACPMessage is the legacy wire format. Still used for basic transport.
-type ACPMessage struct {
-	JSONRPC        string                 `json:"jsonrpc"`
-	ID             string                 `json:"id,omitempty"`
-	Method         string                 `json:"method"`
-	Sender         string                 `json:"sender"`
-	Target         string                 `json:"target,omitempty"`
-	RequiredSkills []string               `json:"required_skills,omitempty"` // capability-based routing
-	TaskID         string                 `json:"task_id,omitempty"`
-	SessionID      string                 `json:"session_id,omitempty"`
-	Params         map[string]interface{} `json:"params,omitempty"`
-}
-
 // MessagePresenter handles transformation of raw wire messages into displayable UI text representations.
 type MessagePresenter struct{}
 
 // Present formats an ACPMessage into its UI display representation (role and text content).
-func (mp MessagePresenter) Present(msg ACPMessage) (role string, textContent string) {
+func (mp MessagePresenter) Present(msg a2am.ACPMessage) (role string, textContent string) {
 	role = "agent"
 	if msg.Sender == "ui_user" || msg.Method == "user_intent" {
 		role = "user"
@@ -183,7 +171,7 @@ func handleUDSConnection(conn net.Conn) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		var msg ACPMessage
+		var msg a2am.ACPMessage
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
 			continue
 		}
@@ -194,7 +182,7 @@ func handleUDSConnection(conn net.Conn) {
 	}
 }
 
-func recordSessionMessage(msg ACPMessage) {
+func recordSessionMessage(msg a2am.ACPMessage) {
 	if msg.SessionID == "" {
 		return
 	}
@@ -213,7 +201,7 @@ func recordSessionMessage(msg ACPMessage) {
 	}
 }
 
-func dispatchMessage(msg ACPMessage, rawLine string, conn net.Conn, agentID *string, outbound chan []byte) {
+func dispatchMessage(msg a2am.ACPMessage, rawLine string, conn net.Conn, agentID *string, outbound chan []byte) {
 	myAgentID := *agentID
 	recordSessionMessage(msg)
 	switch msg.Method {
@@ -238,7 +226,7 @@ func dispatchMessage(msg ACPMessage, rawLine string, conn net.Conn, agentID *str
 	}
 }
 
-func handleRegister(msg ACPMessage, conn net.Conn, agentID *string, outbound chan []byte) {
+func handleRegister(msg a2am.ACPMessage, conn net.Conn, agentID *string, outbound chan []byte) {
 	*agentID = msg.Sender
 	myAgentID := *agentID
 
@@ -286,7 +274,7 @@ func handleRegister(msg ACPMessage, conn net.Conn, agentID *string, outbound cha
 	broadcastState()
 }
 
-func handleMCPToolsList(msg ACPMessage, myAgentID string, outbound chan []byte) {
+func handleMCPToolsList(msg a2am.ACPMessage, myAgentID string, outbound chan []byte) {
 	if msg.Target != "harness" {
 		return
 	}
@@ -308,7 +296,7 @@ func handleMCPToolsList(msg ACPMessage, myAgentID string, outbound chan []byte) 
 	outbound <- append(b, '\n')
 }
 
-func handleMCPToolsCall(msg ACPMessage, myAgentID string, outbound chan []byte) {
+func handleMCPToolsCall(msg a2am.ACPMessage, myAgentID string, outbound chan []byte) {
 	if msg.Target != "harness" {
 		return
 	}
@@ -390,7 +378,7 @@ func handleMCPToolsCall(msg ACPMessage, myAgentID string, outbound chan []byte) 
 	}
 }
 
-func handleTasksSend(msg ACPMessage, rawLine string) {
+func handleTasksSend(msg a2am.ACPMessage, rawLine string) {
 	var task a2a.Task
 	if rawTask, ok := msg.Params["task"].(map[string]interface{}); ok {
 		tb, _ := json.Marshal(rawTask)
@@ -424,7 +412,7 @@ func handleTasksSend(msg ACPMessage, rawLine string) {
 	})
 }
 
-func handleTasksSendUpdate(msg ACPMessage) {
+func handleTasksSendUpdate(msg a2am.ACPMessage) {
 	taskID, _ := msg.Params["task_id"].(string)
 	if taskID == "" {
 		taskID, _ = msg.Params["taskId"].(string)
@@ -531,7 +519,7 @@ func handleTasksSendUpdate(msg ACPMessage) {
 	}
 }
 
-func handleTasksCancel(msg ACPMessage, outbound chan []byte) {
+func handleTasksCancel(msg a2am.ACPMessage, outbound chan []byte) {
 	taskID, _ := msg.Params["task_id"].(string)
 	if taskID == "" {
 		return
@@ -591,7 +579,7 @@ func handleTasksCancel(msg ACPMessage, outbound chan []byte) {
 	outbound <- append(b, '\n')
 }
 
-func handleDiscover(msg ACPMessage, myAgentID string, outbound chan []byte) {
+func handleDiscover(msg a2am.ACPMessage, myAgentID string, outbound chan []byte) {
 	var required []string
 	if rawSkills, ok := msg.Params["required_skills"].([]interface{}); ok {
 		for _, s := range rawSkills {
@@ -646,7 +634,7 @@ func handleDiscover(msg ACPMessage, myAgentID string, outbound chan []byte) {
 	outbound <- append(db, '\n')
 }
 
-func getApprovalState(msg ACPMessage) (a2a.TaskState, string) {
+func getApprovalState(msg a2am.ACPMessage) (a2a.TaskState, string) {
 	status, _ := msg.Params["status"].(string)
 	if status == "approved" {
 		return a2a.TaskStateWorking, "User approved execution"
@@ -692,7 +680,7 @@ func broadcastTaskToUI(taskID string) {
 	}
 }
 
-func handleApprovalResponse(msg ACPMessage, rawLine string) {
+func handleApprovalResponse(msg a2am.ACPMessage, rawLine string) {
 	taskID, _ := msg.Params["task_id"].(string)
 	if taskID == "" {
 		return
@@ -717,7 +705,7 @@ func handleApprovalResponse(msg ACPMessage, rawLine string) {
 	broadcastTaskToUI(taskID)
 }
 
-func handleDefaultRoute(msg ACPMessage, rawLine string) {
+func handleDefaultRoute(msg a2am.ACPMessage, rawLine string) {
 	broadcastWS(map[string]interface{}{
 		"type": "acp_trace",
 		"data": msg,
@@ -784,7 +772,7 @@ func handleWSIncoming(conn *websocket.Conn) {
 		if err != nil {
 			break
 		}
-		var msg ACPMessage
+		var msg a2am.ACPMessage
 		if err := json.Unmarshal(p, &msg); err == nil && msg.Target != "" {
 			broadcastWS(map[string]interface{}{
 				"type": "acp_trace",

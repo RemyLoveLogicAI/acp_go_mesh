@@ -17,17 +17,14 @@ import (
 	"acp-mesh/pkg/a2a"
 )
 
-// ACPMessage is the legacy wire format.
-type ACPMessage struct {
-	JSONRPC        string                 `json:"jsonrpc"`
-	ID             string                 `json:"id,omitempty"`
-	Method         string                 `json:"method"`
-	Sender         string                 `json:"sender"`
-	Target         string                 `json:"target,omitempty"`
-	RequiredSkills []string               `json:"required_skills,omitempty"` // capability-based routing
-	TaskID         string                 `json:"task_id,omitempty"`
-	SessionID      string                 `json:"session_id,omitempty"`
-	Params         map[string]interface{} `json:"params,omitempty"`
+// A2AEnvelope is the A2A wire format for agent communication.
+type A2AEnvelope struct {
+	JSONRPC string          `json:"jsonrpc"`
+	Method  string          `json:"method"`
+	Sender  string          `json:"sender"`
+	Target  string          `json:"target,omitempty"`
+	TaskID  string          `json:"taskId,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 // taskContext holds everything needed to resume a task after approval.
@@ -67,27 +64,28 @@ func main() {
 	fmt.Printf("\033[36m[Worker %s]\033[0m Connected to Harness at %s\n", agentID, socketPath)
 
 	// Send Registration + Agent Card (A2A discovery manifest)
-	regMsg := ACPMessage{
+	regPayload, _ := json.Marshal(map[string]interface{}{
+		"capabilities": capabilities,
+		"tools": []map[string]interface{}{
+			{"name": "execute_shell", "description": "Execute a shell command on host"},
+		},
+		"agentCard": a2a.AgentCard{
+			Name:        agentID,
+			Description: "Shell execution worker with approval gating",
+			Version:     "1.0.0",
+			Skills: []a2a.AgentSkill{
+				{ID: "execute_shell", Name: "Shell Execution", Description: "Runs shell commands with user approval", Tags: []string{"shell", "execution"}},
+			},
+			DefaultInputModes:  []string{"text"},
+			DefaultOutputModes: []string{"text"},
+			LegacyCaps:         capabilities,
+		},
+	})
+	regMsg := A2AEnvelope{
 		JSONRPC: "2.0",
 		Method:  "register",
 		Sender:  agentID,
-		Params: map[string]interface{}{
-			"capabilities": capabilities,
-			"tools": []map[string]interface{}{
-				{"name": "execute_shell", "description": "Execute a shell command on the host"},
-			},
-			"agentCard": a2a.AgentCard{
-				Name:        agentID,
-				Description: "Shell execution worker with approval gating",
-				Version:     "1.0.0",
-				Skills: []a2a.AgentSkill{
-					{ID: "execute_shell", Name: "Shell Execution", Description: "Runs shell commands with user approval", Tags: []string{"shell", "execution"}},
-				},
-				DefaultInputModes:  []string{"text"},
-				DefaultOutputModes: []string{"text"},
-				LegacyCaps:         capabilities,
-			},
-		},
+		Payload: regPayload,
 	}
 	b, _ := json.Marshal(regMsg)
 	conn.Write(append(b, '\n'))
