@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a reproducible issue in routing, task state, transport, UI, or telemetry
+title: "fix: "
+labels: ["bug", "triage"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: "The task moved to working but never completed..."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: List the exact steps needed to reproduce the issue.
+      placeholder: |
+        1. Run `go run main.go`
+        2. Open `http://localhost:8080`
+        3. Submit...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, Go version, commit SHA, and relevant agent configuration.
+      placeholder: "macOS, Go 1.26.1, commit abc123..."
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or traces
+      description: Paste relevant logs, task IDs, trace IDs, or screenshots.
+      render: text

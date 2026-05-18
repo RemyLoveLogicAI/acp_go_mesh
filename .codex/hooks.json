@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run /Users/lovelogic/Documents/01-Active-Projects/acp_go_mesh/.agents/hooks/enforce-uv-run.py"
+          },
+          {
+            "type": "command",
+            "command": "uv run /Users/lovelogic/Documents/01-Active-Projects/acp_go_mesh/.agents/hooks/block-dangerous-commands.py"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/lovelogic/Documents/01-Active-Projects/acp_go_mesh/.agents/hooks/enforce-uv-install.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run /Users/lovelogic/Documents/01-Active-Projects/acp_go_mesh/.agents/hooks/enforce-skill-use.py"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -2,3 +2,7 @@
 .fusion
 .pi
 acp-mesh
+
+
+#Ignore windsurf AI rules
+.windsurfrules

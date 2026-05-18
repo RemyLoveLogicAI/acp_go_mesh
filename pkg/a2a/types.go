@@ -8,6 +8,57 @@ import (
 	"time"
 )
 
+// ACPMessage is the legacy wire format used for transport.
+// Deprecated: Use A2AEnvelope instead.
+type ACPMessage struct {
+	JSONRPC        string                 `json:"jsonrpc"`
+	ID             string                 `json:"id,omitempty"`
+	Method         string                 `json:"method"`
+	Sender         string                 `json:"sender"`
+	Target         string                 `json:"target,omitempty"`
+	RequiredSkills []string               `json:"required_skills,omitempty"` // capability-based routing
+	TaskID         string                 `json:"task_id,omitempty"`
+	SessionID      string                 `json:"session_id,omitempty"`
+	Params         map[string]interface{} `json:"params,omitempty"`
+}
+
+// ToACPMessage converts an A2A task update to legacy ACPMessage format.
+func (tu TaskUpdate) ToACPMessage(sender, target string) ACPMessage {
+	return ACPMessage{
+		JSONRPC: "2.0",
+		Method:  "tasks/sendUpdate",
+		Sender:  sender,
+		Target:  target,
+		Params: map[string]interface{}{
+			"task_id":   tu.TaskID,
+			"status":    tu.Status,
+			"trace_id":  tu.TraceID,
+			"span_id":   tu.SpanID,
+			"artifacts": tu.Artifacts,
+			"history":   tu.History,
+		},
+	}
+}
+
+// FromACPMessage converts legacy ACPMessage to A2A Task if applicable.
+func FromACPMessage(msg ACPMessage) (Task, bool) {
+	if msg.Method == "tasks/send" {
+		var task Task
+		if rawTask, ok := msg.Params["task"].(map[string]interface{}); ok {
+			tb, _ := json.Marshal(rawTask)
+			json.Unmarshal(tb, &task)
+		}
+		if task.ID == "" {
+			task.ID = msg.TaskID
+		}
+		if task.SessionID == "" {
+			task.SessionID = msg.SessionID
+		}
+		return task, true
+	}
+	return Task{}, false
+}
+
 // TaskState represents the lifecycle state of a task.
 type TaskState string
 
@@ -30,8 +81,8 @@ type TaskStatus struct {
 
 // Part is a polymorphic message part (text, data, or file).
 type Part struct {
-	Type string `json:"type"` // "text", "data", "file"
-	Text string `json:"text,omitempty"`
+	Type string          `json:"type"` // "text", "data", "file"
+	Text string          `json:"text,omitempty"`
 	Data json.RawMessage `json:"data,omitempty"`
 }
 
@@ -59,13 +110,13 @@ type Artifact struct {
 
 // Task is the core A2A work unit.
 type Task struct {
-	ID          string     `json:"id"`
-	SessionID   string     `json:"sessionId,omitempty"`
-	Status      TaskStatus `json:"status"`
-	History     []Message  `json:"history,omitempty"`
-	Artifacts   []Artifact `json:"artifacts,omitempty"`
+	ID          string                 `json:"id"`
+	SessionID   string                 `json:"sessionId,omitempty"`
+	Status      TaskStatus             `json:"status"`
+	History     []Message              `json:"history,omitempty"`
+	Artifacts   []Artifact             `json:"artifacts,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	CancelToken string     `json:"cancelToken,omitempty"`
+	CancelToken string                 `json:"cancelToken,omitempty"`
 }
 
 // TaskUpdate is sent when a task's status changes.
@@ -89,25 +140,24 @@ type AgentSkill struct {
 
 // AgentCard is the discovery manifest for an agent (A2A Agent Card v1).
 type AgentCard struct {
-	Name              string       `json:"name"`
-	Description       string       `json:"description,omitempty"`
-	URL               string       `json:"url,omitempty"`
-	Version           string       `json:"version"`
-	Capabilities      struct {
-		Streaming     bool     `json:"streaming,omitempty"`
-		PushNotifications bool `json:"pushNotifications,omitempty"`
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	URL          string `json:"url,omitempty"`
+	Version      string `json:"version"`
+	Capabilities struct {
+		Streaming              bool `json:"streaming,omitempty"`
+		PushNotifications      bool `json:"pushNotifications,omitempty"`
 		StateTransitionHistory bool `json:"stateTransitionHistory,omitempty"`
 	} `json:"capabilities"`
-	Skills            []AgentSkill `json:"skills,omitempty"`
-	DefaultInputModes []string     `json:"defaultInputModes,omitempty"`
-	DefaultOutputModes []string    `json:"defaultOutputModes,omitempty"`
-	Provider          struct {
+	Skills             []AgentSkill `json:"skills,omitempty"`
+	DefaultInputModes  []string     `json:"defaultInputModes,omitempty"`
+	DefaultOutputModes []string     `json:"defaultOutputModes,omitempty"`
+	Provider           struct {
 		Organization string `json:"organization,omitempty"`
 		URL          string `json:"url,omitempty"`
 	} `json:"provider,omitempty"`
 	LegacyCaps []string `json:"legacyCapabilities,omitempty"`
 }
-
 
 // A2AEnvelope wraps any A2A message for transport over the existing UDS/WS wire.
 // This lets us keep the JSON-RPC-like framing while upgrading the payload to A2A semantics.

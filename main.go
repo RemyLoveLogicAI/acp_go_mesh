@@ -1,5 +1,7 @@
 package main
 
+// Package main implements the ACP Go Mesh harness with UDS/Wire transport,
+// task lifecycle management, OpenTelemetry tracing, and WebSocket UI.
 import (
 	"bufio"
 	"bytes"
@@ -33,7 +35,7 @@ var (
 		CheckOrigin: func(r *http.Request) bool {
 			origin := r.Header.Get("Origin")
 			if origin == "" {
-				return true
+				return false
 			}
 			return origin == "http://localhost:8080" || origin == "http://127.0.0.1:8080"
 		},
@@ -80,7 +82,6 @@ func (mp MessagePresenter) Present(msg ACPMessage) (role string, textContent str
 	}
 	return role, textContent
 }
-
 
 var (
 	// Legacy state for tool routing + capability tracking
@@ -148,7 +149,6 @@ func cleanupAgent(myAgentID string) {
 	})
 }
 
-
 func handleUDSConnection(conn net.Conn) {
 	defer conn.Close()
 	scanner := bufio.NewScanner(conn)
@@ -189,6 +189,9 @@ func handleUDSConnection(conn net.Conn) {
 		}
 		dispatchMessage(msg, line, conn, &myAgentID, outbound)
 	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("[Harness] Scanner error: %v", err)
+	}
 }
 
 func recordSessionMessage(msg ACPMessage) {
@@ -209,7 +212,6 @@ func recordSessionMessage(msg ACPMessage) {
 		})
 	}
 }
-
 
 func dispatchMessage(msg ACPMessage, rawLine string, conn net.Conn, agentID *string, outbound chan []byte) {
 	myAgentID := *agentID
@@ -318,7 +320,6 @@ func handleMCPToolsCall(msg ACPMessage, myAgentID string, outbound chan []byte) 
 		stateMu.RUnlock()
 	}
 
-
 	broadcastWS(map[string]interface{}{
 		"type": "acp_trace",
 		"data": msg,
@@ -333,7 +334,8 @@ func handleMCPToolsCall(msg ACPMessage, myAgentID string, outbound chan []byte) 
 		spanCtx := span.SpanContext()
 
 		newTask := a2a.Task{
-			ID: taskID,
+			ID:        taskID,
+			SessionID: msg.SessionID,
 			Status: a2a.NewTaskStatus(a2a.TaskStateSubmitted,
 				"Task submitted via MCP tool call"),
 			Metadata: map[string]interface{}{
@@ -343,6 +345,7 @@ func handleMCPToolsCall(msg ACPMessage, myAgentID string, outbound chan []byte) 
 				"requestPayload": string(reqPayload),
 				"trace_id":       spanCtx.TraceID().String(),
 				"span_id":        spanCtx.SpanID().String(),
+				"session_id":     msg.SessionID,
 			},
 		}
 		_, err := taskStore.CreateTask(newTask)
@@ -357,11 +360,12 @@ func handleMCPToolsCall(msg ACPMessage, myAgentID string, outbound chan []byte) 
 		activeSpansMu.Unlock()
 
 		forward := ACPMessage{
-			JSONRPC: "2.0",
-			Method:  "mcp/tools/call",
-			Sender:  myAgentID,
-			Target:  targetAgent,
-			Params:  msg.Params,
+			JSONRPC:   "2.0",
+			Method:    "mcp/tools/call",
+			Sender:    myAgentID,
+			Target:    targetAgent,
+			SessionID: msg.SessionID,
+			Params:    msg.Params,
 		}
 		forward.Params["task_id"] = taskID
 		forward.Params["requester"] = myAgentID
@@ -422,6 +426,9 @@ func handleTasksSend(msg ACPMessage, rawLine string) {
 
 func handleTasksSendUpdate(msg ACPMessage) {
 	taskID, _ := msg.Params["task_id"].(string)
+	if taskID == "" {
+		taskID, _ = msg.Params["taskId"].(string)
+	}
 	rawStatus, ok := msg.Params["status"].(map[string]interface{})
 	if !ok || taskID == "" {
 		return
@@ -441,25 +448,17 @@ func handleTasksSendUpdate(msg ACPMessage) {
 	targetAgent, _ := meta["targetAgent"].(string)
 
 	if msg.Sender != requester && msg.Sender != targetAgent {
-		log.Printf("[Harness] Unauthorized tasks/sendUpdate from %s for task %s (expected %s or %s)", 
+		log.Printf("[Harness] Unauthorized tasks/sendUpdate from %s for task %s (expected %s or %s)",
 			msg.Sender, taskID, requester, targetAgent)
 		return
 	}
 
-	err := taskStore.TransitionTask(taskID, status.State, status.Message)
-	if err != nil {
-		log.Printf("[Harness] Task transition failed: %v", err)
-		return
-	}
-
-	// End OpenTelemetry span if task reached terminal state
-	if status.State == a2a.TaskStateCompleted || status.State == a2a.TaskStateFailed || status.State == a2a.TaskStateCanceled {
-		activeSpansMu.Lock()
-		if span, ok := activeSpans[taskID]; ok {
-			span.End()
-			delete(activeSpans, taskID)
+	if rawArtifact, ok := msg.Params["artifact"].(map[string]interface{}); ok {
+		var artifact a2a.Artifact
+		ab, _ := json.Marshal(rawArtifact)
+		if err := json.Unmarshal(ab, &artifact); err == nil && len(artifact.Parts) > 0 {
+			sm.SetArtifact(artifact)
 		}
-		activeSpansMu.Unlock()
 	}
 
 	task := sm.Task()
@@ -480,6 +479,34 @@ func handleTasksSendUpdate(msg ACPMessage) {
 			updatePayload["spanId"] = sid
 		}
 	}
+
+	err := taskStore.TransitionTask(taskID, status.State, status.Message)
+	if err != nil {
+		log.Printf("[Harness] Task transition failed: %v", err)
+		return
+	}
+
+	// Broadcast input-required notification to UI/manager for approval gating
+	if status.State == a2a.TaskStateInputRequired {
+		broadcastWS(map[string]interface{}{
+			"type":    "approval_request",
+			"task_id": taskID,
+			"message": status.Message,
+			"traceId": updatePayload["traceId"],
+			"spanId":  updatePayload["spanId"],
+		})
+	}
+
+	// End OpenTelemetry span if task reached terminal state
+	if status.State == a2a.TaskStateCompleted || status.State == a2a.TaskStateFailed || status.State == a2a.TaskStateCanceled {
+		activeSpansMu.Lock()
+		if span, ok := activeSpans[taskID]; ok {
+			span.End()
+			delete(activeSpans, taskID)
+		}
+		activeSpansMu.Unlock()
+	}
+
 	broadcastWS(updatePayload)
 
 	if requester != "" && requester != msg.Sender {
@@ -489,8 +516,12 @@ func handleTasksSendUpdate(msg ACPMessage) {
 			Sender:  "harness",
 			Target:  requester,
 			Params: map[string]interface{}{
-				"task_id": taskID,
-				"status":  status,
+				"task_id":   taskID,
+				"status":    status,
+				"trace_id":  updatePayload["traceId"],
+				"span_id":   updatePayload["spanId"],
+				"artifacts": task.Artifacts,
+				"history":   sm.History(),
 			},
 		}
 		rb, _ := json.Marshal(resp)
@@ -538,12 +569,12 @@ func handleTasksCancel(msg ACPMessage, outbound chan []byte) {
 	}
 	// Notify UI
 	broadcastWS(map[string]interface{}{
-		"type":     "task_update",
-		"taskId":   taskID,
-		"status":   a2a.NewTaskStatus(a2a.TaskStateCanceling, "Cancellation requested"),
-		"traceId":  "",
-		"spanId":   "",
-		"history":  []a2a.TaskStatus{},
+		"type":      "task_update",
+		"taskId":    taskID,
+		"status":    a2a.NewTaskStatus(a2a.TaskStateCanceling, "Cancellation requested"),
+		"traceId":   "",
+		"spanId":    "",
+		"history":   []a2a.TaskStatus{},
 		"artifacts": []a2a.Artifact{},
 	})
 	resp := ACPMessage{
@@ -719,7 +750,6 @@ func handleDefaultRoute(msg ACPMessage, rawLine string) {
 	}
 }
 
-
 func startUDSServer() {
 	os.Remove(udsSocketPath)
 	listener, err := net.Listen("unix", udsSocketPath)
@@ -801,18 +831,15 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-
 	handleWSIncoming(conn)
-
 
 	wsClientsMu.Lock()
 	delete(wsClients, conn)
 	wsClientsMu.Unlock()
 }
 
-func toJSON(v interface{}) string {
-	b, _ := json.Marshal(v)
-	return string(b)
+func toJSON(_ interface{}) string {
+	return "{}"
 }
 
 func spawnAgent(agentPath, agentID, caps string) *exec.Cmd {
@@ -847,15 +874,41 @@ func spawnAgent(agentPath, agentID, caps string) *exec.Cmd {
 	return cmd
 }
 
+var startTime = time.Now()
+
+func handleHealth(w http.ResponseWriter, _ *http.Request) {
+	stateMu.RLock()
+	agentInfo := make(map[string]map[string]interface{}, len(topologyCache))
+	for k, v := range topologyCache {
+		agentInfo[k] = v
+	}
+	stateMu.RUnlock()
+
+	tasks := taskStore.ListTasks()
+	sessions := taskStore.ListSessions()
+
+	resp := map[string]interface{}{
+		"status":       "healthy",
+		"uptime":       time.Since(startTime).String(),
+		"agents":       agentInfo,
+		"taskCount":    len(tasks),
+		"sessionCount": len(sessions),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
 func main() {
 	go startUDSServer()
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		html, _ := uiFiles.ReadFile("ui/index.html")
 		w.Header().Set("Content-Type", "text/html")
 		w.Write(html)
 	})
 	http.HandleFunc("/ws", handleWebSocket)
+	http.HandleFunc("/health", handleHealth)
 
 	go func() {
 		log.Println("[Harness] Command Center UI running at http://localhost:8080")

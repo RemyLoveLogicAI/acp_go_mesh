@@ -193,6 +193,17 @@ func (ts *TaskStore) ListAgentCards() map[string]a2a.AgentCard {
 	return out
 }
 
+// ListTasks returns all active task state machines.
+func (ts *TaskStore) ListTasks() map[string]*a2a.StateMachine {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	out := make(map[string]*a2a.StateMachine, len(ts.tasks))
+	for k, v := range ts.tasks {
+		out[k] = v
+	}
+	return out
+}
+
 // RegisterAgentConn registers an outbound message channel for an agent.
 func (ts *TaskStore) RegisterAgentConn(agentID string, ch chan []byte) {
 	ts.mu.Lock()

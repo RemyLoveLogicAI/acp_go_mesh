@@ -1,7 +1,7 @@
 {
-  "port": 30003,
-  "pid": 25493,
-  "startTime": 1779096202534,
+  "port": 30000,
+  "pid": 14301,
+  "startTime": 1779103916104,
   "host": "127.0.0.1",
   "status": "running"
 }

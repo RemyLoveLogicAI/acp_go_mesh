@@ -57,6 +57,12 @@ func (sm *StateMachine) Transition(newState TaskState, message string) error {
 	defer sm.mu.Unlock()
 
 	current := sm.task.Status.State
+	if current == newState {
+		if message != "" {
+			sm.task.Status.Message = message
+		}
+		return nil
+	}
 	validNext, ok := sm.transitions[current]
 	if !ok {
 		return fmt.Errorf("invalid current state %q", current)

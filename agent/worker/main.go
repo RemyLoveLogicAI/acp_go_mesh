@@ -1,7 +1,9 @@
 package main
 
+// Package main implements a shell execution worker with approval gating.
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -28,7 +30,6 @@ type ACPMessage struct {
 	Params         map[string]interface{} `json:"params,omitempty"`
 }
 
-
 // taskContext holds everything needed to resume a task after approval.
 type taskContext struct {
 	TaskID    string
@@ -36,7 +37,6 @@ type taskContext struct {
 	Requester string
 	SessionID string
 }
-
 
 func main() {
 	agentID := os.Getenv("AGENT_ID")
@@ -87,7 +87,6 @@ func main() {
 				DefaultOutputModes: []string{"text"},
 				LegacyCaps:         capabilities,
 			},
-
 		},
 	}
 	b, _ := json.Marshal(regMsg)
@@ -198,6 +197,9 @@ func main() {
 				execCtx, cancel := context.WithCancel(context.Background())
 				defer cancel()
 				cmd := exec.CommandContext(execCtx, "sh", "-c", ctx.Command)
+				var output bytes.Buffer
+				cmd.Stdout = &output
+				cmd.Stderr = &output
 				cancelCh, hasCancel := cancelChans.Load(taskID)
 
 				var resStatus a2a.TaskState
@@ -222,9 +224,8 @@ func main() {
 
 					// Wait for command to finish
 					err := cmd.Wait()
-					output, _ := cmd.CombinedOutput()
 					resStatus = a2a.TaskStateCompleted
-					resOutput = string(output)
+					resOutput = output.String()
 					if err != nil {
 						if execCtx.Err() == context.Canceled {
 							resStatus = a2a.TaskStateCanceled
@@ -285,7 +286,6 @@ func main() {
 					conn.Write(append(rb, '\n'))
 				}
 
-
 				fmt.Printf("\033[36m[Worker %s]\033[0m Task %s finished (%s).\n", agentID, taskID, resStatus)
 
 			} else {
@@ -293,10 +293,11 @@ func main() {
 
 				// Transition to failed (rejected)
 				rejectMsg := ACPMessage{
-					JSONRPC: "2.0",
-					Method:  "tasks/sendUpdate",
-					Sender:  agentID,
-					Target:  "harness",
+					JSONRPC:   "2.0",
+					Method:    "tasks/sendUpdate",
+					Sender:    agentID,
+					Target:    "harness",
+					SessionID: ctx.SessionID,
 					Params: map[string]interface{}{
 						"task_id": taskID,
 						"status": a2a.TaskStatus{

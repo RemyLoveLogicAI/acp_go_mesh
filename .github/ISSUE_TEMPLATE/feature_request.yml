@@ -1,0 +1,55 @@
+name: Feature request
+description: Propose a capability, adapter, protocol feature, or operator workflow
+title: "feat: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping shape ACP Go Mesh. The best requests describe the agent workflow you want to coordinate and the safety or observability guarantees you need.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What agent orchestration problem are you trying to solve?
+      placeholder: "I have multiple local agents, but..."
+    validations:
+      required: true
+  - type: textarea
+    id: desired-outcome
+    attributes:
+      label: Desired outcome
+      description: What should ACP Go Mesh make possible?
+      placeholder: "When I submit a task, the mesh should..."
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Agent routing
+        - MCP tools
+        - A2A task lifecycle
+        - AG-UI events
+        - Security and approval gates
+        - Observability
+        - Web UI
+        - Documentation or examples
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Agent stack context
+      description: Which agents, CLIs, MCP servers, or local workers should this interact with?
+      placeholder: "Claude Code, Codex CLI, browser agent, shell worker..."
+  - type: textarea
+    id: success
+    attributes:
+      label: Success criteria
+      description: How would we know this is complete?
+      placeholder: "A task can be routed by capability and traced end-to-end..."
+    validations:
+      required: true
