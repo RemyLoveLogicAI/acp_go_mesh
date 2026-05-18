@@ -57,6 +57,7 @@ The harness will automatically spawn:
 - **Manager Agent**: Task orchestration and routing
 
 ## ⚡ 60-Second Demo
+<<<<<<< /Users/lovelogic/Documents/01-Active-Projects/acp_go_mesh/README.md
 
 ```bash
 go run main.go
@@ -85,6 +86,20 @@ go run scripts/smoke.go
 ```
 
 The smoke test expects the harness health endpoint at `http://localhost:8080/health`. If port `8080` is already occupied, stop the existing harness process before starting a new one.
+=======
+
+```bash
+go run main.go
+```
+
+Then open `http://localhost:8080` and send a task through the manager. The harness registers agents, routes by capability, tracks task state, streams updates to the UI, and records telemetry for the execution path.
+
+Expected flow:
+
+```text
+user intent → manager → capability match → worker → task update stream → completed artifact
+```
+>>>>>>> /Users/lovelogic/.windsurf/worktrees/acp_go_mesh/acp_go_mesh-a420476a/README.md
 
 ## 🧭 Use Cases
 
