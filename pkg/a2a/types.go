@@ -40,6 +40,14 @@ type Message struct {
 	Parts []Part `json:"parts"`
 }
 
+// Session tracks conversation history across multiple tasks or interactions.
+type Session struct {
+	ID        string    `json:"id"`
+	Messages  []Message `json:"messages,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	LastSeen  time.Time `json:"lastSeen"`
+}
+
 // Artifact is the output of a task execution.
 type Artifact struct {
 	Name     string                 `json:"name,omitempty"`
@@ -91,7 +99,9 @@ type AgentCard struct {
 		Organization string `json:"organization,omitempty"`
 		URL          string `json:"url,omitempty"`
 	} `json:"provider,omitempty"`
+	LegacyCaps []string `json:"legacyCapabilities,omitempty"`
 }
+
 
 // A2AEnvelope wraps any A2A message for transport over the existing UDS/WS wire.
 // This lets us keep the JSON-RPC-like framing while upgrading the payload to A2A semantics.

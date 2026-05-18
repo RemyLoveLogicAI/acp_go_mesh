@@ -175,3 +175,390 @@ Saved. The dashboard HTML is now in memory as a design reference for this projec
 **When I'll pull it:** Any time we work on `ui/index.html` — upgrading panels, adding views, styling components, or designing new sections. The reference captures the full design system: CSS tokens, panel/card/badge patterns, terminal emulator, topology canvas, Chart.js setup, workflow strip, and all 12 nav views.
 
 The file itself isn't in the repo yet — if you want it committed or used as the new `ui/index.html` baseline, just say the word.
+
+---
+
+_**User (2026-05-18 09:33:30Z)**_
+
+/Users/lovelogic/.zshenv:.:2: no such file or directory: /Users/lovelogic/.lrc/env
+lovelogic@mac-mini-m4 acp_go_mesh % hermes 
+Warning: Unknown toolsets: hermes
+
+╔═══════════════════════════════════════════╗
+║ ⚕ NOUS HERMES - AI Agent Framework      ║
+║ Hermes Agent v0.14.0 (2026.5.16) · upst ║
+╚═══════════════════════════════════════════╝
+
+  ● kimi-k2.6 · 32 tools · toolsets: browser,
+clarify, code_execution, cronjob, delegation,
+file, hermes, image_gen, kanban, memory, 
+messaging, moa, pieces, session_search, 
+skills, terminal, todo, tts, vision, web · 
+provider: opencode-go
+
+Welcome to Hermes Agent! Type your message or
+/help for commands.
+✦ Tip: /debug uploads a support bundle 
+(system info + logs) and returns shareable 
+links — works in chat too.
+
+
+────────────────────────────────────────
+● /btw i just nstalled 
+npm:@ollama/pi-web-search
+npm:context-mode
+... (+14 more lines)
+npm:taskplane
+npm:@companion-ai/feynman
+Initializing agent...
+
+────────────────────────────────────────
+
+╭─ ⚕ Hermes ────────────────────────────────╮
+    Got it. That's a solid stack of Pi-ecosystem packages — looks like you're setting up a pretty extensive agent mesh with web search, subagents, MCP bridging, Telegram/Intercom integrations, crew orchestration, and a Feynman learning companion on top.
+    
+    A few quick observations:
+    
+    - pi-mcp-adapter + pi-web-search + pi-web-access gives your Pi instances tool-use and live web context
+    - pi-subagents + pi-agent-flow + pi-crew = multi-agent orchestration layer
+    - @ollama/pi-web-search ties local inference into the search pipeline
+    - rpiv-btw, rpiv-todo, rpiv-advisor look like Juicesharp's Raspberry Pi agent utilities
+    - pi-telegram + pi-intercom = external comms bridges
+    
+    What's the goal here — are you wiring this Pi mesh into the existing LoveLogicAI fabric (Zo/NATS/Orion), running it as a separate agent plane, or experimenting with a new node on the Mini?
+    
+    If you want, I can help validate the installs, check for version conflicts, or draft an integration config to hook these into our Mattermost/ACP mesh or the Orion control plane.
+╰───────────────────────────────────────────╯
+
+────────────────────────────────────────
+● ook them up and brainstorm
+────────────────────────────────────────
+
+  Usage: /steer <prompt>
+  ┊ 🔍 preparing web_search…
+  ┊ 🔍 preparing web_search…
+  ┊ 🔍 preparing web_search…
+  ┊ 🔍 search    npm pi-web-search pi-subagents pi-mcp-adapter pi-web-access plannotator pi-extension  3.4s
+  ┊ 🔍 search    npm juicesharp rpiv-todo rpiv-btw rpiv-advisor runfusion fusion glimpseui pi-agent-flow  1.9s
+  ┊ 🔍 search    npm pi-crew pi-studio llblab pi-telegram pi-intercom howaboua pi-codex-conversion taskplane  2.0s
+  ⏩ Steer queued — arrives after the next tool call: look them up and brainstorm
+  ┊ 🔍 preparing web_search…
+  ┊ 📄 preparing web_extract…
+/Volumes/SAMSUNG SSD/LOCAL_SHARE/.hermes/hermes-agent/agent/auxiliary_client.py:2268: RuntimeWarning: coroutine 'AsyncAPIClient.close' was never awaited
+  close_fn()
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+  ┊ 🔍 search    npm @companion-ai/feynman pi coding agent  1.0s
+  ┊ 📄 fetch     pi.dev +3  50.1s
+  ┊ 🔍 preparing web_search…
+  ┊ 🔍 search    npm runfusion fusion glimpseui pi-agent-flow pi-studio  1.1s
+
+╭─ ⚕ Hermes ────────────────────────────────╮
+    Here is the full catalog and a brainstorm on how these plug into the Orion theater.
+    
+    PI ECOSYSTEM STACK ANALYSIS
+    ══════════════════════════════════════════════════════════
+    
+    CORE RUNTIME
+      pi-codex               — Use Codex CLI tools (apply_patch, etc.) inside Pi
+      @howaboua/pi-codex-conversion  — Codex↔Pi bridge, shell-first inspection
+      context-mode           — Pi's context/memory management layer
+    
+    AGENT ORCHESTRATION
+      pi-subagents           — Async child agent delegation (scout, researcher,
+                               planner, worker, reviewer, oracle). Truncation,
+                               artifacts, session sharing, worktree isolation.
+                               Integrates with pi-intercom for supervisor escalation.
+      pi-crew                — Full multi-agent team orchestration with durable
+                               state, parallel execution, Prometheus/OTLP metrics,
+                               background runs, 1575+ test suite.
+      pi-agent-flow          — Workflow DAG engine for Pi agents
+      @runfusion/fusion      — MULTI-NODE agent orchestrator. Tasks, agents,
+                               missions, git, worktrees across machines. This is
+                               the big one for your tailnet mesh.
+    
+    COMMUNICATION
+      pi-intercom            — 1:1 local IPC messaging between Pi sessions on
+                               same host. send/ask/reply patterns. Child-to-
+                               supervisor escalation when paired with pi-subagents.
+      @llblab/pi-telegram    — Telegram bridge for Pi session alerts/control
+      pi-web-access          — Live web fetch/browse inside Pi
+      @ollama/pi-web-search  — Local web search via Ollama (sovereign, no API keys)
+    
+    PLANNING & COGNITION
+      @plannotator/pi-extension  — File-based plan mode with visual browser UI
+                                   for review/annotation/approval. Matches your
+                                   spec-first, Mode→Goal→Plan discipline.
+      taskplane              — Idea → Spec → Task batches. Orchestrates quality
+                               coding through structured phases.
+      @juicesharp/rpiv-todo   — Persistent todo overlay surviving /reload and
+                               compaction. State locality for Pi.
+      @juicesharp/rpiv-btw    — Context injection ("by the way") patterns
+      @juicesharp/rpiv-advisor — Skill-based advisory layer
+    
+    RESEARCH & INTELLIGENCE
+      @companion-ai/feynman  — Local-first research agent built on Pi + alphaXiv.
+                               Reads papers, searches web, writes drafts, cites
+                               claims. Runs entirely on your machine.
+    
+    STUDIO & UI
+      glimpseui              — Overlay/UI primitives for Pi (war-room dashboard
+                               potential)
+      pi-studio              — IDE-like studio environment for Pi sessions
+    
+    ══════════════════════════════════════════════════════════
+    BRAINSTORM: PI AS THE TACTICAL RUNTIME IN THE ORION THEATER
+    ══════════════════════════════════════════════════════════
+    
+    1. DUAL-COMMAND ARCHITECTURE
+       Keep Hermes as the "Strategic Command" (fabric orchestrator, Mattermost
+       mesh, cross-node NATS messaging, cron, kanban). Pi becomes the "Tactical
+       Ground Team" on each node — Mini, Zo, MacBook Air — handling deep coding
+       dives, repo surgery, and local agent swarms.
+    
+       Hermes asks "what needs doing" and delegates. Pi crews execute with
+       worktree isolation and report back.
+    
+    2. MULTI-NODE FUSION MESH (THE KILLER INTEGRATION)
+       @runfusion/fusion is explicitly multi-node. On your tailnet/headscale
+       mesh, this means:
+       - Mini (M4) hosts the Fusion coordinator
+       - Zo (Linux) and MacBook Air join as worker nodes
+       - Pi crews span across the private network with git worktrees on each
+       - Tasks auto-route to the node with the right context / GPU / env
+    
+       This mirrors your Orion Control Plane provider routing but at the
+       coding-agent layer. Hermes handles inference routing; Fusion handles
+       coding-agent routing.
+    
+    3. FEYNMAN AS THE 4D AI TWIN'S RESEARCH CORTEX
+       Feynman runs local on Mini, reads arXiv papers, audits codebases against
+       research claims, and produces cited drafts. Pipe its output into:
+       - Your Mattermost #peer-coordination channel for async review
+       - Hermes kanban as intelligence briefings
+       - Pi plans as specification inputs
+    
+       "Dark cinematic war-room" aesthetic: Feynman generates "intelligence
+       reports" with citations, formatted like Tarkovsky-style briefings.
+    
+    4. PI-INTERCOM ↔ MATTERMOST BRIDGE
+       pi-intercom does local 1:1 IPC today (same machine only). A thin bridge
+       script could forward Pi session events to your Mattermost
+       #agent-hermes-mini or #agent-zo-worker channels. This gives you:
+       - Pi session awareness in the Mattermost mesh
+       - Human override on stuck Pi subagents via Mattermost threads
+       - Cross-machine Pi visibility (today pi-intercom is local-only)
+    
+    5. TELEGRAM MOBILE COMMAND CENTER
+       @llblab/pi-telegram already gives Pi Telegram reach. Wire it into your
+       existing unified channel orchestrator (Instagram/Telegram/WhatsApp) so
+       Pi can push completion alerts, receive "/deploy" commands, or send
+       "stuck, need decision" asks when you're AFK but on mobile.
+    
+    6. SOVEREIGN SEARCH STACK
+       @ollama/pi-web-search + pi-web-access = fully local web research inside
+       Pi. No OpenAI, no Google API keys. Your Ollama instance (gemma4, qwen3)
+       powers the search + reasoning loop. This aligns perfectly with your
+       "deterministic free/open-source first" doctrine.
+    
+    7. SPEC-FIRST DEVELOPMENT PIPELINE
+       Plannotator + Taskplane + rpiv-todo creates a formal development ritual:
+       - Plannotator: Visual plan review in browser (dark mode it?)
+       - Taskplane: Idea → structured spec → task batch
+       - rpiv-todo: Survives reloads, gives Pi persistent mission state
+       - rpiv-advisor: Constitutional AI-style guidance during execution
+    
+       This formalizes your Mode→Goal→Plan communication pattern into Pi's
+       native tooling.
+    
+    8. GHOSTTY GRID + PI STUDIO
+       You already run a 4-terminal Ghostty grid for Hermes kanban. Add a
+       5th pane running pi-studio for interactive plan editing, and use
+       glimpseui overlays for live agent status across the grid. War-room
+       visualization of your coding swarm.
+    
+    9. DOCKERLESS DEPLOYMENT
+       Pi packages are npm-installed and run natively. Zero containers needed.
+       Fits your "native/bare-metal only" preference. Fusion multi-node uses
+       direct SSH/git/worktrees — no Kubernetes theater.
+    
+    10. CODEX MIGRATION BRIDGE
+        @howaboua/pi-codex-conversion bundles apply_patch from Codex's actual
+        codebase. If you ever need to port Codex CLI workflows into Pi (or
+        vice versa), this is the compatibility layer. Useful if you want to
+        A/B test Codex vs Pi on the same repo.
+    
+    ══════════════════════════════════════════════════════════
+    SUGGESTED ACTIVATION ORDER
+    ══════════════════════════════════════════════════════════
+    
+    Phase 1 — Local Sovereignty (Mini only)
+      pi-intercom → pi-subagents → @ollama/pi-web-search → pi-web-access
+      @juicesharp/rpiv-todo → @plannotator/pi-extension → taskplane
+    
+    Phase 2 — Mesh Expansion (Mini + Zo + MacBook)
+      @runfusion/fusion multi-node config across tailnet
+      Pi crews with worktree isolation spanning repos on each node
+    
+    Phase 3 — Intelligence Layer
+      @companion-ai/feynman for research briefings
+      @llblab/pi-telegram for mobile alerts
+      Bridge pi-intercom events into Mattermost channels
+    
+    Phase 4 — Theater Aesthetics
+      glimpseui overlays in Ghostty grid
+      pi-studio for plan visualization
+      Dark-themed plan review via Plannotator CSS injection
+    
+    ══════════════════════════════════════════════════════════
+    
+    What resonates? I can draft a Fusion mesh config for your three nodes,
+    wire Feynman into the Mattermost intelligence channel, or build the
+    pi-intercom → Mattermost bridge if you want cross-session visibility
+    outside of localhost.
+╰───────────────────────────────────────────╯
+ ⚕ kimi-k2.6 · 4m 
+─────────────────────────────────────────────
+❯
+
+---
+
+_**Agent (claude-sonnet-4-6 2026-05-18 09:33:42Z)**_
+
+<think><details><summary>Thought Process</summary>
+The user is sharing a Hermes agent terminal session showing them installing a bunch of Pi ecosystem npm packages and getting an analysis/brainstorm from Hermes (their other AI agent). They said "add to references and use if you should" - which means they want me to save this as a reference memory for the project context, capturing the Pi ecosystem analysis and brainstorm.
+
+This is relevant to the acp_go_mesh project context because it describes their broader AI agent infrastructure (Orion theater, Hermes, Zo nodes, tailnet mesh, etc.) - though Pi and acp_go_mesh are different projects/tools. However, this gives important context about their overall agent mesh architecture and tooling philosophy.
+
+
+I'll add this to my project memory by updating the MEMORY.md file and creating a new reference entry that captures the Pi ecosystem analysis and how it fits into their broader agent infrastructure.
+</details></think>
+
+_**Agent (claude-sonnet-4-6 2026-05-18 09:34:05Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```md
+---
+name: Pi Ecosystem npm Stack — Orion Theater Integration Brainstorm
+description: Full catalog and integration brainstorm (from Hermes/Kimi-K2.6 session May 18 2026) of Pi agent framework npm packages installed on Mac Mini M4. Covers multi-node mesh, sovereign search, spec-first pipeline, Telegram bridge, and activation phases. Relevant context for acp_go_mesh architecture decisions.
+type: reference
+---
+
+# Pi Ecosystem Stack (npm, installed May 18 2026)
+
+Hermes (Kimi-K2.6) researched and analyzed these. Full session saved here.
+
+## Packages Installed
+
+### Core Runtime
+- `pi-codex` — Use Codex CLI tools (apply_patch etc.) inside Pi
+- `@howaboua/pi-codex-conversion` — Codex↔Pi shell-first bridge
+- `context-mode` — Pi's context/memory management layer
+
+### Agent Orchestration
+- `pi-subagents` — Async child agent delegation (scout, researcher, planner, worker, reviewer, oracle). Truncation, artifacts, session sharing, worktree isolation. Integrates with pi-intercom for supervisor escalation.
+- `pi-crew` — Full multi-agent team orchestration, durable state, parallel execution, Prometheus/OTLP metrics, 1575+ test suite
+- `pi-agent-flow` — Workflow DAG engine for Pi agents
+- `@runfusion/fusion` — **Multi-node** agent orchestrator. Tasks, agents, missions, git, worktrees across machines. Tailnet-native mesh coordination.
+
+### Communication
+- `pi-intercom` — 1:1 local IPC between Pi sessions on same host. send/ask/reply patterns. Child→supervisor escalation.
+- `@llblab/pi-telegram` — Telegram bridge for Pi session alerts/control
+- `pi-web-access` — Live web fetch/browse inside Pi
+- `@ollama/pi-web-search` — Local web search via Ollama (sovereign, no API keys)
+
+### Planning & Cognition
+- `@plannotator/pi-extension` — File-based plan mode with visual browser UI for review/annotation/approval
+- `taskplane` — Idea → Spec → Task batches. Orchestrates quality coding through structured phases.
+- `@juicesharp/rpiv-todo` — Persistent todo overlay surviving /reload and compaction
+- `@juicesharp/rpiv-btw` — Context injection ("by the way") patterns
+- `@juicesharp/rpiv-advisor` — Skill-based advisory layer
+
+### Research & Intelligence
+- `@companion-ai/feynman` — Local-first research agent on Pi + alphaXiv. Reads papers, searches web, writes drafts, cites claims. Fully local.
+
+### Studio & UI
+- `glimpseui` — Overlay/UI primitives for Pi
+- `pi-studio` — IDE-like studio environment for Pi sessions
+
+---
+
+## Hermes Brainstorm: Pi in the Orion Theater
+
+### Key Architecture Points
+1. **Dual-Command:** Hermes = Strategic Command (fabric orchestrator, Mattermost mesh, NATS, cron, kanban). Pi = Tactical Ground Team on each node for deep coding dives and local agent swarms.
+
+2. **Fusion Multi-Node Mesh (killer integration):** `@runfusion/fusion` spans Mini (M4) as coordinator + Zo (Linux) + MacBook Air as workers across tailnet/headscale. Pi crews + git worktrees across private network. Coding-agent routing layer separate from Hermes inference routing.
+
+3. **Feynman as Research Cortex:** Local arXiv paper reading → cited intelligence briefings → pipe into Mattermost #peer-coordination or Hermes kanban. "Tarkovsky-style" intelligence report aesthetic.
+
+4. **Pi-Intercom ↔ Mattermost Bridge:** Thin bridge script to forward Pi session events to Mattermost agent channels. Enables human override on stuck Pi subagents via Mattermost threads.
+
+5. **Telegram Mobile Command:** Pi-telegram + existing unified channel orchestrator → mobile alerts, /deploy commands, "stuck, need decision" asks when AFK.
+
+6. **Sovereign Search Stack:** @ollama/pi-web-search + pi-web-access = fully local web research. Ollama (gemma4, qwen3) powers search+reasoning loop. No external API keys.
+
+7. **Spec-First Pipeline:** Plannotator (visual plan review) + Taskplane (idea→spec→tasks) + rpiv-todo (persistent state) + rpiv-advisor (constitutional guidance). Formalizes Mode→Goal→Plan into Pi native tooling.
+
+8. **Ghostty Grid + Pi Studio:** 5th pane in Ghostty grid running pi-studio. Glimpseui overlays for live agent status across war-room grid.
+
+9. **Dockerless/Native:** npm-installed, bare-metal only. Fusion uses SSH/git/worktrees — no Kubernetes.
+
+10. **Codex Migration Bridge:** pi-codex-conversion for porting Codex CLI workflows into Pi or A/B testing both on same repo.
+
+### Suggested Activation Order
+**Phase 1 — Local Sovereignty (Mini only)**
+pi-intercom → pi-subagents → @ollama/pi-web-search → pi-web-access → @juicesharp/rpiv-todo → @plannotator/pi-extension → taskplane
+
+**Phase 2 — Mesh Expansion (Mini + Zo + MacBook)**
+@runfusion/fusion multi-node config across tailnet, Pi crews with worktree isolation
+
+**Phase 3 — Intelligence Layer**
+@companion-ai/feynman for research briefings, @llblab/pi-telegram for mobile alerts, pi-intercom→Mattermost bridge
+
+**Phase 4 — Theater Aesthetics**
+glimpseui overlays in Ghostty grid, pi-studio for plan visualization, dark Plannotator CSS injection
+
+---
+
+## Relevance to acp_go_mesh
+- Fusion multi-node is a potential production deployment target for the Go mesh harness (Mini + Zo worker nodes)
+- Pi-crew/pi-subagents orchestration patterns map directly to the A2A task delegation model being built
+- Sovereign search aligns with the mesh's capability routing — a web-search skill served by a Pi agent
+- Feynman could be wired as a research agent registered to the ACP mesh via the A2A agent card system
+- OTLP/Prometheus metrics from pi-crew = potential observability integration point with the mesh harness
+
+```
+
+```text
+File created successfully at: /Users/lovelogic/.claude/projects/-Users-lovelogic-Documents-01-Active-Projects-acp-go-mesh/memory/reference_pi_ecosystem.md
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-4-6 2026-05-18 09:34:17Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Edit"><details>
+<summary>Tool use: **Edit**</summary>
+
+```text
+The file /Users/lovelogic/.claude/projects/-Users-lovelogic-Documents-01-Active-Projects-acp-go-mesh/memory/MEMORY.md has been updated successfully.
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-4-6 2026-05-18 09:34:23Z)**_
+
+<think><details><summary>Thought Process</summary>
+These are just spellcheck hints from the IDE on a memory markdown file - not real errors, just an ATM Code Spell extension flagging technical terms like "acp", "ACP", "ops", "topology", "emulator". These are false positives and don't need any action. I'll ignore them.
+</details></think>
+
+_**Agent (claude-sonnet-4-6 2026-05-18 09:34:25Z)**_
+
+Saved. Just spellcheck false-positives on technical terms — nothing to fix.
+
+The Pi ecosystem reference is now in memory. Key connections I'll draw on when relevant:
+
+- **`@runfusion/fusion`** multi-node = natural deployment target for the Go mesh harness spanning Mini + Zo
+- **`pi-subagents` / `pi-crew`** orchestration patterns mirror the A2A task delegation model in acp_go_mesh
+- **`@companion-ai/feynman`** could register as a research agent via the A2A agent card system
+- **pi-crew's OTLP/Prometheus** = potential observability hook into the mesh harness

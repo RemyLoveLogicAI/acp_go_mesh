@@ -15,12 +15,17 @@ import (
 
 // ACPMessage is the legacy wire format.
 type ACPMessage struct {
-	JSONRPC string                 `json:"jsonrpc"`
-	Method  string                 `json:"method"`
-	Sender  string                 `json:"sender"`
-	Target  string                 `json:"target,omitempty"`
-	Params  map[string]interface{} `json:"params,omitempty"`
+	JSONRPC        string                 `json:"jsonrpc"`
+	ID             string                 `json:"id,omitempty"`
+	Method         string                 `json:"method"`
+	Sender         string                 `json:"sender"`
+	Target         string                 `json:"target,omitempty"`
+	RequiredSkills []string               `json:"required_skills,omitempty"` // capability-based routing
+	TaskID         string                 `json:"task_id,omitempty"`
+	SessionID      string                 `json:"session_id,omitempty"`
+	Params         map[string]interface{} `json:"params,omitempty"`
 }
+
 
 // taskTracker holds the manager's view of in-flight tasks.
 type taskTracker struct {
@@ -89,7 +94,9 @@ func main() {
 				},
 				DefaultInputModes:  []string{"text"},
 				DefaultOutputModes: []string{"text"},
+				LegacyCaps:         capabilities,
 			},
+
 		},
 	}
 	b, _ := json.Marshal(regMsg)
@@ -125,15 +132,19 @@ func main() {
 
 						if hasExecute {
 							execMsg := ACPMessage{
-								JSONRPC: "2.0",
-								Method:  "mcp/tools/call",
-								Sender:  agentID,
-								Target:  "harness",
+								JSONRPC:        "2.0",
+								Method:         "mcp/tools/call",
+								Sender:         agentID,
+								Target:         "harness",
+								SessionID:      "session_123",
+								RequiredSkills: []string{"execute_shell"},
 								Params: map[string]interface{}{
-									"tool_name": "execute_shell",
-									"command":   pendingUserIntent,
+									"tool_name":  "execute_shell",
+									"command":    pendingUserIntent,
+									"session_id": "session_123",
 								},
 							}
+
 							eb, _ := json.Marshal(execMsg)
 							fmt.Printf("\033[35m[Manager %s]\033[0m Delegating intent to mesh via execute_shell tool...\n", agentID)
 							conn.Write(append(eb, '\n'))

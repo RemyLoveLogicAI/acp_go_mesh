@@ -17,6 +17,7 @@ type TaskStore struct {
 	subs     map[string][]chan a2a.TaskUpdate // taskID -> subscriber channels
 	agents   map[string]a2a.AgentCard         // agentID -> card
 	agentConns map[string]chan []byte         // agentID -> outbound message channel
+	sessions   map[string]*a2a.Session        // sessionID -> session
 }
 
 // NewTaskStore creates an empty task store.
@@ -26,6 +27,7 @@ func NewTaskStore() *TaskStore {
 		subs:       make(map[string][]chan a2a.TaskUpdate),
 		agents:     make(map[string]a2a.AgentCard),
 		agentConns: make(map[string]chan []byte),
+		sessions:   make(map[string]*a2a.Session),
 	}
 }
 
@@ -43,6 +45,69 @@ func (ts *TaskStore) GetAgentCard(agentID string) (a2a.AgentCard, bool) {
 	c, ok := ts.agents[agentID]
 	return c, ok
 }
+
+// FindAgentBySkill resolves an agent ID that supports the requested skill ID.
+// Supports matching against A2A structured Skills and falls back to LegacyCaps.
+func (ts *TaskStore) FindAgentBySkill(skillID string) (string, bool) {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	for agentID, card := range ts.agents {
+		for _, s := range card.Skills {
+			if s.ID == skillID {
+				return agentID, true
+			}
+		}
+		for _, legacyCap := range card.LegacyCaps {
+			if legacyCap == skillID {
+				return agentID, true
+			}
+		}
+	}
+	return "", false
+}
+
+// GetOrCreateSession retrieves an existing session or initializes a new one.
+func (ts *TaskStore) GetOrCreateSession(sessionID string) *a2a.Session {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	if s, ok := ts.sessions[sessionID]; ok {
+		s.LastSeen = time.Now().UTC()
+		return s
+	}
+	s := &a2a.Session{
+		ID:        sessionID,
+		CreatedAt: time.Now().UTC(),
+		LastSeen:  time.Now().UTC(),
+	}
+	ts.sessions[sessionID] = s
+	return s
+}
+
+// AppendSessionMessage appends a message to a session's history.
+func (ts *TaskStore) AppendSessionMessage(sessionID string, msg a2a.Message) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	s, ok := ts.sessions[sessionID]
+	if !ok {
+		s = &a2a.Session{
+			ID:        sessionID,
+			CreatedAt: time.Now().UTC(),
+			LastSeen:  time.Now().UTC(),
+		}
+		ts.sessions[sessionID] = s
+	}
+	s.Messages = append(s.Messages, msg)
+	s.LastSeen = time.Now().UTC()
+}
+
+// GetSession returns a session by ID.
+func (ts *TaskStore) GetSession(sessionID string) (*a2a.Session, bool) {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	s, ok := ts.sessions[sessionID]
+	return s, ok
+}
+
 
 // ListAgentCards returns all registered agent cards.
 func (ts *TaskStore) ListAgentCards() map[string]a2a.AgentCard {

@@ -16,19 +16,26 @@ import (
 
 // ACPMessage is the legacy wire format.
 type ACPMessage struct {
-	JSONRPC string                 `json:"jsonrpc"`
-	Method  string                 `json:"method"`
-	Sender  string                 `json:"sender"`
-	Target  string                 `json:"target,omitempty"`
-	Params  map[string]interface{} `json:"params,omitempty"`
+	JSONRPC        string                 `json:"jsonrpc"`
+	ID             string                 `json:"id,omitempty"`
+	Method         string                 `json:"method"`
+	Sender         string                 `json:"sender"`
+	Target         string                 `json:"target,omitempty"`
+	RequiredSkills []string               `json:"required_skills,omitempty"` // capability-based routing
+	TaskID         string                 `json:"task_id,omitempty"`
+	SessionID      string                 `json:"session_id,omitempty"`
+	Params         map[string]interface{} `json:"params,omitempty"`
 }
+
 
 // taskContext holds everything needed to resume a task after approval.
 type taskContext struct {
 	TaskID    string
 	Command   string
 	Requester string
+	SessionID string
 }
+
 
 func main() {
 	agentID := os.Getenv("AGENT_ID")
@@ -77,7 +84,9 @@ func main() {
 				},
 				DefaultInputModes:  []string{"text"},
 				DefaultOutputModes: []string{"text"},
+				LegacyCaps:         capabilities,
 			},
+
 		},
 	}
 	b, _ := json.Marshal(regMsg)
@@ -110,15 +119,17 @@ func main() {
 					TaskID:    taskID,
 					Command:   command,
 					Requester: requester,
+					SessionID: msg.SessionID,
 				})
 
 				// Transition task to input-required (approval needed)
 				// Do NOT block. The worker continues listening.
 				updateMsg := ACPMessage{
-					JSONRPC: "2.0",
-					Method:  "tasks/sendUpdate",
-					Sender:  agentID,
-					Target:  "harness",
+					JSONRPC:   "2.0",
+					Method:    "tasks/sendUpdate",
+					Sender:    agentID,
+					Target:    "harness",
+					SessionID: msg.SessionID,
 					Params: map[string]interface{}{
 						"task_id": taskID,
 						"status": a2a.TaskStatus{
@@ -128,6 +139,7 @@ func main() {
 						},
 					},
 				}
+
 				ub, _ := json.Marshal(updateMsg)
 				conn.Write(append(ub, '\n'))
 
@@ -150,10 +162,11 @@ func main() {
 
 				// Transition to working
 				workingMsg := ACPMessage{
-					JSONRPC: "2.0",
-					Method:  "tasks/sendUpdate",
-					Sender:  agentID,
-					Target:  "harness",
+					JSONRPC:   "2.0",
+					Method:    "tasks/sendUpdate",
+					Sender:    agentID,
+					Target:    "harness",
+					SessionID: ctx.SessionID,
 					Params: map[string]interface{}{
 						"task_id": taskID,
 						"status": a2a.TaskStatus{
@@ -179,10 +192,11 @@ func main() {
 
 				// Transition to completed or failed
 				finalMsg := ACPMessage{
-					JSONRPC: "2.0",
-					Method:  "tasks/sendUpdate",
-					Sender:  agentID,
-					Target:  "harness",
+					JSONRPC:   "2.0",
+					Method:    "tasks/sendUpdate",
+					Sender:    agentID,
+					Target:    "harness",
+					SessionID: ctx.SessionID,
 					Params: map[string]interface{}{
 						"task_id": taskID,
 						"status": a2a.TaskStatus{
@@ -210,10 +224,11 @@ func main() {
 						mcpStatus = "error"
 					}
 					resp := ACPMessage{
-						JSONRPC: "2.0",
-						Method:  "mcp/tools/call/response",
-						Sender:  agentID,
-						Target:  ctx.Requester,
+						JSONRPC:   "2.0",
+						Method:    "mcp/tools/call/response",
+						Sender:    agentID,
+						Target:    ctx.Requester,
+						SessionID: ctx.SessionID,
 						Params: map[string]interface{}{
 							"task_id": taskID,
 							"status":  mcpStatus,
@@ -223,6 +238,7 @@ func main() {
 					rb, _ := json.Marshal(resp)
 					conn.Write(append(rb, '\n'))
 				}
+
 
 				fmt.Printf("\033[36m[Worker %s]\033[0m Task %s finished (%s).\n", agentID, taskID, resStatus)
 
