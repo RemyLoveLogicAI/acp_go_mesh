@@ -7,9 +7,10 @@ import (
 
 // StateMachine tracks a single task's lifecycle and validates transitions.
 type StateMachine struct {
-	mu    sync.RWMutex
-	task  Task
+	mu          sync.RWMutex
+	task        Task
 	transitions map[TaskState][]TaskState // valid next states from current
+	history     []TaskStatus
 }
 
 // DefaultTransitions defines the valid A2A state transitions.
@@ -30,6 +31,7 @@ func NewStateMachine(task Task) *StateMachine {
 	return &StateMachine{
 		task:        task,
 		transitions: DefaultTransitions,
+		history:     []TaskStatus{},
 	}
 }
 
@@ -74,8 +76,19 @@ func (sm *StateMachine) Transition(newState TaskState, message string) error {
 		message = fmt.Sprintf("Transitioned from %s to %s", current, newState)
 	}
 
+	// Record the previous state in history before updating
+	sm.history = append(sm.history, sm.task.Status)
 	sm.task.Status = NewTaskStatus(newState, message)
 	return nil
+}
+
+// History returns a copy of the task's state transition history.
+func (sm *StateMachine) History() []TaskStatus {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	out := make([]TaskStatus, len(sm.history))
+	copy(out, sm.history)
+	return out
 }
 
 // CanTransition checks if a transition is allowed without executing it.

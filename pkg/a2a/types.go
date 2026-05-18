@@ -68,9 +68,13 @@ type Task struct {
 
 // TaskUpdate is sent when a task's status changes.
 type TaskUpdate struct {
-	TaskID    string    `json:"taskId"`
-	Status    TaskStatus `json:"status"`
-	Timestamp time.Time `json:"timestamp"`
+	TaskID    string       `json:"taskId"`
+	Status    TaskStatus   `json:"status"`
+	Timestamp time.Time    `json:"timestamp"`
+	TraceID   string       `json:"traceId,omitempty"`
+	SpanID    string       `json:"spanId,omitempty"`
+	Artifacts []Artifact   `json:"artifacts,omitempty"`
+	History   []TaskStatus `json:"history,omitempty"`
 }
 
 // AgentSkill describes a single skill an agent provides.

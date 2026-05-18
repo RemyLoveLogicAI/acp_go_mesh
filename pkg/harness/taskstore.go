@@ -12,30 +12,60 @@ import (
 
 // TaskStore holds all active tasks and provides pub/sub for status updates.
 type TaskStore struct {
-	mu       sync.RWMutex
-	tasks    map[string]*a2a.StateMachine
-	subs     map[string][]chan a2a.TaskUpdate // taskID -> subscriber channels
-	agents   map[string]a2a.AgentCard         // agentID -> card
-	agentConns map[string]chan []byte         // agentID -> outbound message channel
-	sessions   map[string]*a2a.Session        // sessionID -> session
+	mu          sync.RWMutex
+	tasks       map[string]*a2a.StateMachine
+	subs        map[string][]chan a2a.TaskUpdate // taskID -> subscriber channels
+	agents      map[string]a2a.AgentCard         // agentID -> card
+	agentConns  map[string]chan []byte         // agentID -> outbound message channel
+	sessions    map[string]*a2a.Session        // sessionID -> session
+	skillRR     map[string]int                   // skillID -> round-robin index
+	skillsIndex map[string][]string            // skillID -> list of agentIDs
 }
-
 // NewTaskStore creates an empty task store.
 func NewTaskStore() *TaskStore {
 	return &TaskStore{
-		tasks:      make(map[string]*a2a.StateMachine),
-		subs:       make(map[string][]chan a2a.TaskUpdate),
-		agents:     make(map[string]a2a.AgentCard),
-		agentConns: make(map[string]chan []byte),
-		sessions:   make(map[string]*a2a.Session),
+		tasks:       make(map[string]*a2a.StateMachine),
+		subs:        make(map[string][]chan a2a.TaskUpdate),
+		agents:      make(map[string]a2a.AgentCard),
+		agentConns:  make(map[string]chan []byte),
+		sessions:    make(map[string]*a2a.Session),
+		skillRR:     make(map[string]int),
+		skillsIndex: make(map[string][]string),
 	}
 }
 
-// RegisterAgentCard stores an agent's discovery manifest.
+
+
+// RegisterAgentCard stores an agent's discovery manifest and indexes its skills for fast O(1) discovery.
 func (ts *TaskStore) RegisterAgentCard(agentID string, card a2a.AgentCard) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
+
+	// Clean up any existing index mapping for this agent (supporting clean re-registration)
+	for skillID, list := range ts.skillsIndex {
+		var newList []string
+		for _, aid := range list {
+			if aid != agentID {
+				newList = append(newList, aid)
+			}
+		}
+		if len(newList) == 0 {
+			delete(ts.skillsIndex, skillID)
+		} else {
+			ts.skillsIndex[skillID] = newList
+		}
+	}
+
 	ts.agents[agentID] = card
+
+	// Index new skills
+	for _, s := range card.Skills {
+		ts.skillsIndex[s.ID] = append(ts.skillsIndex[s.ID], agentID)
+	}
+	// Index new legacy caps
+	for _, c := range card.LegacyCaps {
+		ts.skillsIndex[c] = append(ts.skillsIndex[c], agentID)
+	}
 }
 
 // GetAgentCard returns the registered card for an agent.
@@ -47,29 +77,21 @@ func (ts *TaskStore) GetAgentCard(agentID string) (a2a.AgentCard, bool) {
 }
 
 // FindAgentBySkill resolves an agent ID that supports the requested skill ID.
-// Supports matching against A2A structured Skills and falls back to LegacyCaps.
+// Performs a high-performance O(1) index lookup.
 func (ts *TaskStore) FindAgentBySkill(skillID string) (string, bool) {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
-	for agentID, card := range ts.agents {
-		for _, s := range card.Skills {
-			if s.ID == skillID {
-				return agentID, true
-			}
-		}
-		for _, legacyCap := range card.LegacyCaps {
-			if legacyCap == skillID {
-				return agentID, true
-			}
-		}
+	list, ok := ts.skillsIndex[skillID]
+	if ok && len(list) > 0 {
+		return list[0], true
 	}
 	return "", false
 }
 
-// GetOrCreateSession retrieves an existing session or initializes a new one.
-func (ts *TaskStore) GetOrCreateSession(sessionID string) *a2a.Session {
-	ts.mu.Lock()
-	defer ts.mu.Unlock()
+
+// getOrCreateSessionLocked retrieves an existing session or initializes a new one.
+// Must be called with ts.mu lock held.
+func (ts *TaskStore) getOrCreateSessionLocked(sessionID string) *a2a.Session {
 	if s, ok := ts.sessions[sessionID]; ok {
 		s.LastSeen = time.Now().UTC()
 		return s
@@ -83,22 +105,22 @@ func (ts *TaskStore) GetOrCreateSession(sessionID string) *a2a.Session {
 	return s
 }
 
+// GetOrCreateSession retrieves an existing session or initializes a new one.
+func (ts *TaskStore) GetOrCreateSession(sessionID string) *a2a.Session {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return ts.getOrCreateSessionLocked(sessionID)
+}
+
 // AppendSessionMessage appends a message to a session's history.
 func (ts *TaskStore) AppendSessionMessage(sessionID string, msg a2a.Message) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	s, ok := ts.sessions[sessionID]
-	if !ok {
-		s = &a2a.Session{
-			ID:        sessionID,
-			CreatedAt: time.Now().UTC(),
-			LastSeen:  time.Now().UTC(),
-		}
-		ts.sessions[sessionID] = s
-	}
+	s := ts.getOrCreateSessionLocked(sessionID)
 	s.Messages = append(s.Messages, msg)
 	s.LastSeen = time.Now().UTC()
 }
+
 
 // GetSession returns a session by ID.
 func (ts *TaskStore) GetSession(sessionID string) (*a2a.Session, bool) {
@@ -107,6 +129,20 @@ func (ts *TaskStore) GetSession(sessionID string) (*a2a.Session, bool) {
 	s, ok := ts.sessions[sessionID]
 	return s, ok
 }
+
+// ListSessions returns a copy of all active sessions.
+func (ts *TaskStore) ListSessions() map[string]a2a.Session {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	out := make(map[string]a2a.Session, len(ts.sessions))
+	for k, v := range ts.sessions {
+		if v != nil {
+			out[k] = *v
+		}
+	}
+	return out
+}
+
 
 
 // ListAgentCards returns all registered agent cards.
@@ -127,13 +163,14 @@ func (ts *TaskStore) RegisterAgentConn(agentID string, ch chan []byte) {
 	ts.agentConns[agentID] = ch
 }
 
-// UnregisterAgentConn removes an agent's outbound channel.
-func (ts *TaskStore) UnregisterAgentConn(agentID string) {
+// UnregisterAgent removes an agent's UDS connection and dynamic advertised capabilities from the registry.
+func (ts *TaskStore) UnregisterAgent(agentID string) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 	delete(ts.agentConns, agentID)
 	delete(ts.agents, agentID)
 }
+
 
 // SendToAgent delivers a raw JSON line to an agent's outbound channel.
 func (ts *TaskStore) SendToAgent(agentID string, payload []byte) bool {
@@ -192,6 +229,17 @@ func (ts *TaskStore) TransitionTask(taskID string, newState a2a.TaskState, messa
 		TaskID:    taskID,
 		Status:    sm.Task().Status,
 		Timestamp: time.Now().UTC(),
+		Artifacts: sm.Task().Artifacts,
+		History:   sm.History(),
+	}
+	// Populate trace context from metadata if present
+	if meta := sm.Task().Metadata; meta != nil {
+		if tid, ok := meta["trace_id"].(string); ok {
+			update.TraceID = tid
+		}
+		if sid, ok := meta["span_id"].(string); ok {
+			update.SpanID = sid
+		}
 	}
 	// Broadcast to subscribers
 	for _, ch := range ts.subs[taskID] {

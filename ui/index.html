@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>A2A Mesh Command Center</title>
+    <title>A2A Sovereign Mesh Command Center</title>
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 
     <!-- Xterm.js -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
@@ -14,114 +17,702 @@
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #1e1e1e; color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
-        h1 { margin-top: 0; color: #5ce1e6; font-size: 1.5em; }
-        .grid-container { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 20px; flex: 1; overflow: hidden; }
-        .panel { background: #252526; border: 1px solid #333; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; }
+        :root {
+            --bg-gradient: radial-gradient(circle at top, #0f0c1b 0%, #05020a 100%);
+            --panel-bg: rgba(18, 12, 34, 0.45);
+            --panel-border: rgba(167, 139, 250, 0.15);
+            --glow-cyan: #00f2fe;
+            --glow-purple: #a78bfa;
+            --glow-pink: #f472b6;
+            --text-main: #f3f1f7;
+            --text-muted: #94a3b8;
+            --active-neon: #10b981;
+        }
 
-        #topology-panel { grid-column: 1 / 2; grid-row: 1 / 2; }
-        #network-graph { flex: 1; border: 1px solid #333; background: #111; border-radius: 6px; }
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
 
-        #control-panel { grid-column: 1 / 2; grid-row: 2 / 3; }
-        #logs { flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px; background: #000; padding: 10px; border-radius: 6px; margin-bottom: 10px;}
-        .log-entry { margin-bottom: 4px; border-bottom: 1px dashed #222; padding-bottom: 4px; }
+        /* Ambient glowing circles */
+        .ambient-glow-1 { position: absolute; top: -10%; left: 20%; width: 40vw; height: 40vw; background: radial-gradient(circle, rgba(167,139,250,0.06) 0%, transparent 70%); pointer-events: none; z-index: -1; }
+        .ambient-glow-2 { position: absolute; bottom: -10%; right: 10%; width: 35vw; height: 35vw; background: radial-gradient(circle, rgba(0,242,254,0.04) 0%, transparent 70%); pointer-events: none; z-index: -1; }
 
-        #terminal-panel { grid-column: 2 / 3; grid-row: 1 / 3; }
-        #terminal { flex: 1; background: #000; padding: 10px; border-radius: 6px; overflow: hidden;}
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            z-index: 10;
+        }
 
-        input[type="text"] { width: calc(100% - 90px); padding: 8px; border: 1px solid #555; background: #333; color: #fff; border-radius: 4px; }
-        button { padding: 8px 16px; background: #5ce1e6; color: #000; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
-        button:hover { background: #4bb8bd; }
-        .form-row { display: flex; gap: 10px; }
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 800;
+            margin: 0;
+            background: linear-gradient(135deg, var(--glow-cyan) 0%, #4facfe 50%, var(--glow-purple) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+            filter: drop-shadow(0 2px 10px rgba(0, 242, 254, 0.25));
+        }
+
+        .meta-strip {
+            display: flex;
+            gap: 15px;
+            font-size: 0.85rem;
+        }
+
+        .meta-badge {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--panel-border);
+            padding: 6px 12px;
+            border-radius: 99px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            backdrop-filter: blur(8px);
+        }
+
+        .meta-indicator {
+            width: 8px;
+            height: 8px;
+            background: var(--active-neon);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--active-neon);
+            animation: pulse-indicator 2s infinite;
+        }
+
+        @keyframes pulse-indicator {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: 340px 1fr 380px;
+            gap: 20px;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Glassmorphic Panel styling */
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: border-color 0.3s ease;
+        }
+
+        .panel:hover {
+            border-color: rgba(167, 139, 250, 0.3);
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 8px;
+        }
+
+        .panel-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #d8b4fe;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Left Column: Topology & Agent Explorer & Task Timeline */
+        #left-col {
+            display: grid;
+            grid-template-rows: 1fr 1fr auto;
+            gap: 20px;
+            overflow: hidden;
+        }
+
+        #network-graph {
+            flex: 1;
+            border-radius: 12px;
+            background: rgba(5, 2, 10, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            overflow: hidden;
+        }
+
+        #agent-details-panel {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 12px;
+            font-size: 0.85rem;
+            display: none;
+            animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(15px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .agent-field {
+            margin-bottom: 8px;
+        }
+
+        .agent-field strong {
+            color: var(--glow-purple);
+        }
+
+        .skill-tag {
+            display: inline-block;
+            background: rgba(167, 139, 250, 0.12);
+            border: 1px solid rgba(167, 139, 250, 0.25);
+            color: #c084fc;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            margin-right: 4px;
+            margin-bottom: 4px;
+        }
+
+        /* Middle Column: Chat & Session tracker */
+        #chat-hub {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        #chat-scroller {
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 8px;
+            margin-bottom: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        /* Beautiful Chat Bubbles */
+        .chat-bubble {
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            position: relative;
+            animation: bubbleIntro 0.25s ease-out;
+            backdrop-filter: blur(8px);
+        }
+
+        @keyframes bubbleIntro {
+            from { transform: scale(0.95); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+        .bubble-user {
+            align-self: flex-start;
+            background: rgba(0, 242, 254, 0.08);
+            border: 1px solid rgba(0, 242, 254, 0.25);
+            border-top-left-radius: 4px;
+            box-shadow: 0 0 15px rgba(0, 242, 254, 0.05);
+        }
+
+        .bubble-user::before {
+            content: "USER INTENT";
+            display: block;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: var(--glow-cyan);
+            margin-bottom: 4px;
+            letter-spacing: 0.5px;
+        }
+
+        .bubble-agent {
+            align-self: flex-end;
+            background: rgba(167, 139, 250, 0.08);
+            border: 1px solid rgba(167, 139, 250, 0.25);
+            border-top-right-radius: 4px;
+            box-shadow: 0 0 15px rgba(167, 139, 250, 0.05);
+        }
+
+        .bubble-agent::before {
+            content: "AGENT COORDINATOR / EXECUTION";
+            display: block;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: var(--glow-purple);
+            margin-bottom: 4px;
+            letter-spacing: 0.5px;
+        }
+
+        /* Command Deck Entry */
+        .command-bar {
+            display: flex;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 8px;
+            border-radius: 12px;
+        }
+
+        #command-input {
+            flex: 1;
+            border: none;
+            background: transparent;
+            color: var(--text-main);
+            font-family: inherit;
+            padding: 8px 12px;
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        #command-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        #send-btn {
+            background: linear-gradient(135deg, var(--glow-cyan) 0%, #4facfe 100%);
+            border: none;
+            color: #000;
+            font-weight: 700;
+            padding: 0 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            letter-spacing: 0.5px;
+        }
+
+        #send-btn:hover {
+            transform: scale(1.03);
+            box-shadow: 0 0 15px rgba(0, 242, 254, 0.4);
+        }
+
+        /* Task Approval Panel */
+        #approval-section {
+            background: rgba(243, 156, 18, 0.08);
+            border: 1px solid rgba(243, 156, 18, 0.35);
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 12px;
+            display: none;
+            animation: pulse-glow 2s infinite alternate;
+        }
+
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 10px rgba(243, 156, 18, 0.1); }
+            100% { box-shadow: 0 0 20px rgba(243, 156, 18, 0.25); }
+        }
+
+        .approval-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .btn-approve {
+            background: #10b981;
+            border: none;
+            color: #000;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+
+        .btn-reject {
+            background: #ef4444;
+            border: none;
+            color: #fff;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+
+        /* Right Column: Telemetry Trace Logs & PTY Stream */
+        #right-col {
+            display: grid;
+            grid-template-rows: 240px 1fr;
+            gap: 20px;
+            overflow: hidden;
+        }
+
+        #trace-panel {
+            overflow: hidden;
+        }
+
+        #logs {
+            flex: 1;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            background: rgba(5, 2, 10, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .log-entry {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+            padding-bottom: 4px;
+            line-height: 1.3;
+        }
+
+        #terminal-panel {
+            overflow: hidden;
+        }
+
+        #terminal {
+            flex: 1;
+            background: rgba(5, 2, 10, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            padding: 6px;
+            overflow: hidden;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 99px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
 
         .task-badge {
             display: inline-block;
-            padding: 2px 8px;
+            padding: 2px 6px;
             border-radius: 4px;
-            font-size: 10px;
-            font-weight: bold;
+            font-size: 9px;
+            font-weight: 700;
             text-transform: uppercase;
             margin-left: 6px;
         }
-        .task-submitted { background: #3498db; color: white; }
-        .task-working { background: #f39c12; color: white; }
-        .task-input-required { background: #e74c3c; color: white; animation: pulse 1.5s infinite; }
-        .task-completed { background: #27ae60; color: white; }
-        .task-failed { background: #c0392b; color: white; }
-        .task-canceled { background: #7f8c8d; color: white; }
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
+        .task-submitted { background: rgba(59, 130, 246, 0.15); border: 1px solid #3b82f6; color: #60a5fa; }
+        .task-working { background: rgba(245, 158, 11, 0.15); border: 1px solid #f59e0b; color: #fbbf24; }
+        .task-input-required { background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; animation: flash-badge 1s infinite alternate; }
+        .task-completed { background: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #34d399; }
+        .task-failed { background: rgba(220, 38, 38, 0.15); border: 1px solid #dc2626; color: #f87171; }
+
+        @keyframes flash-badge {
+            from { box-shadow: 0 0 2px rgba(239, 68, 68, 0.2); }
+            to { box-shadow: 0 0 10px rgba(239, 68, 68, 0.6); }
+        }
+
+        /* Task Timeline Styles */
+        #task-timeline-panel {
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        #task-timeline-container {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .timeline-task {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 10px;
+            padding: 10px;
+            font-size: 0.8rem;
+            transition: all 0.2s ease;
+        }
+        .timeline-task:hover {
+            border-color: rgba(167, 139, 250, 0.25);
+        }
+        .timeline-task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .timeline-task-id {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+        .timeline-timestamp {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+        }
+        .timeline-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin: 6px 0;
+            padding-left: 8px;
+            border-left: 2px solid rgba(167, 139, 250, 0.15);
+        }
+        .timeline-step {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        .timeline-step-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--glow-purple);
+            flex-shrink: 0;
+        }
+        .timeline-step-current .timeline-step-dot {
+            background: var(--glow-cyan);
+            box-shadow: 0 0 6px var(--glow-cyan);
+        }
+        .timeline-step-current {
+            color: var(--text-main);
+            font-weight: 600;
+        }
+        .progress-bar {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 2px;
+            margin: 6px 0;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--glow-cyan), var(--glow-purple));
+            border-radius: 2px;
+            width: 0%;
+            transition: width 0.5s ease;
+            animation: progress-pulse 2s infinite;
+        }
+        @keyframes progress-pulse {
+            0% { opacity: 0.7; }
+            50% { opacity: 1; }
+            100% { opacity: 0.7; }
+        }
+        .timeline-artifacts {
+            margin-top: 6px;
+        }
+        .artifact-toggle {
+            background: none;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--glow-purple);
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .artifact-content {
+            display: none;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 6px;
+            padding: 8px;
+            margin-top: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            max-height: 120px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            color: #c4b5fd;
+        }
+        .artifact-content.open {
+            display: block;
+        }
+        .timeline-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .btn-timeline {
+            border: none;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .btn-approve {
+            background: #10b981;
+            color: #000;
+        }
+        .btn-reject {
+            background: #ef4444;
+            color: #fff;
+        }
+        .btn-cancel {
+            background: #f59e0b;
+            color: #000;
+        }
+        .trace-link {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
         }
     </style>
 </head>
 <body>
-    <h1>A2A Mesh Command Center</h1>
+    <div class="ambient-glow-1"></div>
+    <div class="ambient-glow-2"></div>
+
+    <header>
+        <h1>A2A Mesh Command Center</h1>
+        <div class="meta-strip">
+            <div class="meta-badge">
+                <div class="meta-indicator"></div>
+                Telemetry Active
+            </div>
+            <div class="meta-badge" style="color: var(--glow-cyan)">
+                Session ID: session_123
+            </div>
+        </div>
+    </header>
+
     <div class="grid-container">
-        <!-- TOP LEFT: Topology Graph -->
-        <div class="panel" id="topology-panel">
-            <h2 style="margin-top:0; font-size:1.1em;">Mesh Topology</h2>
-            <div id="network-graph"></div>
+        <!-- LEFT: Topology & Agent Explorer -->
+        <div id="left-col">
+            <div class="panel" style="flex: 1;">
+                <div class="panel-header">
+                    <div class="panel-title">Mesh Topology</div>
+                </div>
+                <div id="network-graph"></div>
+            </div>
+
+            <!-- Dynamic Agent Details Card -->
+            <div id="agent-details-panel">
+                <h4 style="margin: 0 0 8px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 4px; font-weight:700;" id="agent-name-title">Agent Detail</h4>
+                <div class="agent-field"><strong>Uptime:</strong> <span id="agent-detail-uptime">Online</span></div>
+                <div class="agent-field"><strong>Skills:</strong> <div id="agent-skills-list" style="margin-top: 4px;"></div></div>
+            </div>
         </div>
 
-        <!-- BOTTOM LEFT: Event Logs & Control -->
-        <div class="panel" id="control-panel">
-            <h2 style="margin-top:0; font-size:1.1em;">A2A Event Trace</h2>
-            <div id="logs"></div>
+        <!-- MIDDLE: Chat Hub & Session Tracking -->
+        <div class="panel" id="chat-hub">
+            <div class="panel-header">
+                <div class="panel-title">Sovereign Session Thread</div>
+            </div>
 
-            <!-- A2A Task Approval Section -->
-            <div id="approval-section" style="display:none; margin-bottom: 10px; background: #331; padding: 10px; border: 1px solid #f39c12; border-radius: 4px;">
-                <strong style="color: #f39c12">Approval Required:</strong>
-                <div id="approval-task-id" style="font-family: monospace; font-size: 11px; color: #aaa; margin: 2px 0;"></div>
-                <div id="approval-command" style="font-family: monospace; margin: 5px 0;"></div>
-                <div class="form-row">
-                    <button id="approve-btn" style="background: #27ae60; color: white;">Approve</button>
-                    <button id="reject-btn" style="background: #e74c3c; color: white;">Reject</button>
+            <!-- Task Approval Deck -->
+            <div id="approval-section">
+                <strong style="color: #fbbf24; font-size: 0.9rem;">⚠️ Verification Gate</strong>
+                <div id="approval-task-id" style="font-family: monospace; font-size: 11px; color: var(--text-muted); margin: 4px 0;"></div>
+                <div id="approval-command" style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px; margin: 6px 0; color: #fff;"></div>
+                <div class="approval-actions">
+                    <button class="btn-approve" id="approve-btn">Approve & Execute</button>
+                    <button class="btn-reject" id="reject-btn">Reject Action</button>
                 </div>
             </div>
 
-            <div class="form-row">
-                <input type="text" id="command-input" placeholder="e.g. List files in the current directory" />
+            <!-- Thread Conversation Scroller -->
+            <div id="chat-scroller"></div>
+
+            <!-- Intent Input Deck -->
+            <div class="command-bar">
+                <input type="text" id="command-input" placeholder="Enter mesh instructions or intent..." />
                 <button id="send-btn">Inject</button>
             </div>
         </div>
 
-        <!-- RIGHT: Terminal Stream -->
-        <div class="panel" id="terminal-panel">
-            <h2 style="margin-top:0; font-size:1.1em;">Multiplexed PTY Stream</h2>
-            <div id="terminal"></div>
+        <!-- RIGHT: Telemetry trace logs & PTY Stream -->
+        <div id="right-col">
+            <!-- Telemetry Trace -->
+            <div class="panel" id="trace-panel">
+                <div class="panel-header">
+                    <div class="panel-title">A2A Trace Logs</div>
+                </div>
+                <div id="logs"></div>
+            </div>
+
+            <!-- Multiplexed Terminal -->
+            <div class="panel" id="terminal-panel">
+                <div class="panel-header">
+                    <div class="panel-title">PTY Stream</div>
+                </div>
+                <div id="terminal"></div>
+            </div>
         </div>
     </div>
 
     <script>
         // Setup Xterm
-        const term = new Terminal({ theme: { background: '#000' } });
+        const term = new Terminal({
+            theme: {
+                background: '#05020a',
+                foreground: '#f3f1f7',
+                cursor: '#a78bfa'
+            },
+            fontFamily: 'JetBrains Mono',
+            fontSize: 12
+        });
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
         term.open(document.getElementById('terminal'));
         fitAddon.fit();
         window.onresize = () => fitAddon.fit();
-        term.writeln('\x1b[32m[System]\x1b[0m Terminal Ready.');
+        term.writeln('\x1b[35m[Telemetry]\x1b[0m Multiplexed PTY Stream Initialized.');
 
         // Setup vis-network
-        const nodes = new vis.DataSet([{ id: 'harness', label: 'Harness Router', color: '#e74c3c' }]);
+        const nodes = new vis.DataSet([{ id: 'harness', label: 'Harness Router', color: '#a78bfa' }]);
         const edges = new vis.DataSet([]);
         const container = document.getElementById('network-graph');
         const data = { nodes: nodes, edges: edges };
         const options = {
-            nodes: { shape: 'dot', size: 20, font: { color: '#fff' }, borderWidth: 2 },
-            edges: { color: '#888', arrows: 'to' },
-            physics: { barnesHut: { gravitationalConstant: -2000, centralGravity: 0.3, springLength: 95 } }
+            nodes: {
+                shape: 'dot',
+                size: 20,
+                font: { color: '#f3f1f7', face: 'Outfit', size: 12 },
+                borderWidth: 2,
+                color: {
+                    background: '#05020a',
+                    border: '#a78bfa',
+                    highlight: { background: '#120c22', border: '#00f2fe' }
+                }
+            },
+            edges: { color: 'rgba(167, 139, 250, 0.4)', arrows: 'to' },
+            physics: { barnesHut: { gravitationalConstant: -1800, centralGravity: 0.25, springLength: 90 } }
         };
         const network = new vis.Network(container, data, options);
 
         // Setup WebSocket
         const ws = new WebSocket("ws://" + location.host + "/ws");
         const logsDiv = document.getElementById('logs');
+        const chatScroller = document.getElementById('chat-scroller');
         let activeAgents = {};
         let pendingApprovalTaskId = null;
-        let pendingApprovalSender = null;
 
         function appendLog(color, source, message, badge) {
             const el = document.createElement('div');
@@ -131,9 +722,18 @@
             if (badge) {
                 badgeHtml = `<span class="task-badge task-${badge.state}">${badge.state}</span>`;
             }
-            el.innerHTML = `[${time}] <strong style="color:${color}">[${source}]</strong> ${message}${badgeHtml}`;
+            el.innerHTML = `<span style="color:var(--text-muted)">[${time}]</span> <strong style="color:${color}">[${source}]</strong> ${message}${badgeHtml}`;
             logsDiv.appendChild(el);
             logsDiv.scrollTop = logsDiv.scrollHeight;
+        }
+
+        // Add dynamic chat message bubble
+        function appendChatMessage(role, text) {
+            const bubble = document.createElement('div');
+            bubble.className = `chat-bubble bubble-${role}`;
+            bubble.innerText = text;
+            chatScroller.appendChild(bubble);
+            chatScroller.scrollTop = chatScroller.scrollHeight;
         }
 
         function updateTopology() {
@@ -142,12 +742,44 @@
             edges.clear();
 
             for (const [id, info] of Object.entries(activeAgents)) {
-                let capsStr = info.capabilities ? info.capabilities.join(',') : '';
-                let toolsStr = info.tools && info.tools.length > 0 ? '\nTools: ' + info.tools.join(',') : '';
-                nodes.add({ id: id, label: `${id}\n[${capsStr}]${toolsStr}`, color: '#5ce1e6' });
+                nodes.add({ id: id, label: id, color: { border: '#a78bfa' } });
                 edges.add({ from: id, to: 'harness' });
             }
         }
+
+        // Click handler to explore Agent Card details
+        network.on("click", function(params) {
+            if (params.nodes.length > 0) {
+                const nodeID = params.nodes[0];
+                if (nodeID === 'harness') {
+                    document.getElementById('agent-name-title').innerText = "Harness Router";
+                    document.getElementById('agent-detail-uptime').innerText = "Dynamic Local Node";
+                    document.getElementById('agent-skills-list').innerHTML = `<span class="skill-tag">Routing</span><span class="skill-tag">Brokerage</span>`;
+                    document.getElementById('agent-details-panel').style.display = 'block';
+                } else if (activeAgents[nodeID]) {
+                    const info = activeAgents[nodeID];
+                    document.getElementById('agent-name-title').innerText = `${nodeID} [v${info.version || '1.0.0'}]`;
+                    document.getElementById('agent-detail-uptime').innerText = "Online";
+
+                    let skillsHtml = "";
+                    if (info.skills && info.skills.length > 0) {
+                        info.skills.forEach(s => {
+                            skillsHtml += `<span class="skill-tag" title="${s.description}">${s.name} (${s.id})</span>`;
+                        });
+                    } else if (info.capabilities && info.capabilities.length > 0) {
+                        info.capabilities.forEach(c => {
+                            skillsHtml += `<span class="skill-tag">${c}</span>`;
+                        });
+                    } else {
+                        skillsHtml = `<span style="color:var(--text-muted)">None declared</span>`;
+                    }
+                    document.getElementById('agent-skills-list').innerHTML = skillsHtml;
+                    document.getElementById('agent-details-panel').style.display = 'block';
+                }
+            } else {
+                document.getElementById('agent-details-panel').style.display = 'none';
+            }
+        });
 
         ws.onmessage = (e) => {
             const msg = JSON.parse(e.data);
@@ -155,7 +787,7 @@
             if (msg.type === "state_update") {
                 activeAgents = msg.agents;
                 updateTopology();
-                appendLog('#4ade80', 'Harness', 'Topology graph updated.');
+                appendLog('var(--glow-purple)', 'Harness', 'Sovereign Topology graph updated.');
 
             } else if (msg.type === "acp_trace") {
                 const trace = msg.data;
@@ -163,10 +795,18 @@
                 if (trace.target && nodes.get(trace.target) && nodes.get(trace.sender)) {
                     const edgeId = trace.sender + '-' + trace.target;
                     try {
-                        edges.add({ id: edgeId, from: trace.sender, to: trace.target, color: { color: '#f39c12' }, dashes: true });
+                        edges.add({ id: edgeId, from: trace.sender, to: trace.target, color: { color: 'var(--glow-pink)' }, dashes: true });
                         setTimeout(() => edges.remove(edgeId), 1000);
                     } catch(e) {}
                 }
+
+            } else if (msg.type === "session_update") {
+                const sessionMessage = msg.message;
+                let text = "";
+                if (sessionMessage.parts && sessionMessage.parts.length > 0) {
+                    text = sessionMessage.parts[0].text || "";
+                }
+                appendChatMessage(sessionMessage.role, text);
 
             } else if (msg.type === "task_update") {
                 const taskId = msg.taskId || msg.task_id;
@@ -174,11 +814,10 @@
                 const state = status.state;
                 const message = status.message || '';
 
-                appendLog('#9b59b6', 'A2A', `Task ${taskId}: ${message}`, { state: state });
+                appendLog('#c084fc', 'A2A', `Task ${taskId}: ${message}`, { state: state });
 
                 if (state === 'input-required') {
                     pendingApprovalTaskId = taskId;
-                    // Try to extract command from message
                     let cmd = message;
                     if (message.includes('Approval required for:')) {
                         cmd = message.split('Approval required for:')[1].trim();
@@ -197,13 +836,13 @@
                 term.write(msg.data);
 
             } else if (msg.type === "log") {
-                appendLog('#f1c40f', msg.source, msg.message);
+                appendLog('#fbbf24', msg.source, msg.message);
             }
         };
 
-        ws.onopen = () => appendLog('#4ade80', 'System', 'WebSocket connected.');
+        ws.onopen = () => appendLog('#10b981', 'System', 'Secure WebSocket telemetry synced.');
 
-        // Approval Handling (A2A: send to harness, which routes to worker)
+        // Approval Handling
         document.getElementById('approve-btn').onclick = () => {
             if (pendingApprovalTaskId && ws.readyState === WebSocket.OPEN) {
                 const acpMsg = {
@@ -214,7 +853,7 @@
                     params: { task_id: pendingApprovalTaskId, status: "approved" }
                 };
                 ws.send(JSON.stringify(acpMsg));
-                appendLog('#27ae60', 'UI', `Approved task ${pendingApprovalTaskId}`);
+                appendLog('#10b981', 'UI', `Verifying & executing task ${pendingApprovalTaskId}`);
                 document.getElementById('approval-section').style.display = 'none';
             }
         };
@@ -229,7 +868,7 @@
                     params: { task_id: pendingApprovalTaskId, status: "rejected" }
                 };
                 ws.send(JSON.stringify(acpMsg));
-                appendLog('#e74c3c', 'UI', `Rejected task ${pendingApprovalTaskId}`);
+                appendLog('#ef4444', 'UI', `Rejected task execution ${pendingApprovalTaskId}`);
                 document.getElementById('approval-section').style.display = 'none';
             }
         };
@@ -243,10 +882,10 @@
                     method: "user_intent",
                     sender: "ui_user",
                     target: "manager",
+                    session_id: "session_123",
                     params: { command: text }
                 };
                 ws.send(JSON.stringify(acpMsg));
-                appendLog('#e74c3c', 'UI', `Injected command: ${text}`);
                 input.value = '';
             }
         };

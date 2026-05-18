@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 
 	"acp-mesh/pkg/a2a"
 	"acp-mesh/pkg/harness"
@@ -62,6 +65,11 @@ var (
 
 	// A2A task store (Wave 1)
 	taskStore = harness.NewTaskStore()
+
+	// OpenTelemetry tracer and active span tracking
+	tracer        = otel.Tracer("acp-mesh")
+	activeSpans   = make(map[string]trace.Span)
+	activeSpansMu sync.Mutex
 )
 
 func broadcastWS(msg interface{}) {
@@ -102,7 +110,7 @@ func cleanupAgent(myAgentID string) {
 	delete(topologyCache, myAgentID)
 	stateMu.Unlock()
 
-	taskStore.UnregisterAgentConn(myAgentID)
+	taskStore.UnregisterAgent(myAgentID)
 	broadcastState()
 	broadcastWS(map[string]interface{}{
 		"type":    "log",
@@ -110,6 +118,7 @@ func cleanupAgent(myAgentID string) {
 		"message": fmt.Sprintf("Agent %s disconnected.", myAgentID),
 	})
 }
+
 
 func handleUDSConnection(conn net.Conn) {
 	defer conn.Close()
@@ -184,7 +193,13 @@ func recordSessionMessage(msg ACPMessage) {
 			Parts: []a2a.Part{{Type: "text", Text: textContent}},
 		}
 		taskStore.AppendSessionMessage(msg.SessionID, a2aMsg)
+		broadcastWS(map[string]interface{}{
+			"type":       "session_update",
+			"session_id": msg.SessionID,
+			"message":    a2aMsg,
+		})
 	}
+
 }
 
 func dispatchMessage(msg ACPMessage, rawLine string, conn net.Conn, agentID *string, outbound chan []byte) {
@@ -297,6 +312,10 @@ func handleMCPToolsCall(msg ACPMessage, myAgentID string, outbound chan []byte) 
 		taskID := fmt.Sprintf("task_%s_%d", myAgentID, time.Now().UnixNano())
 		reqPayload, _ := json.Marshal(msg.Params)
 
+		// Start OpenTelemetry span for task lifecycle
+		_, span := tracer.Start(context.Background(), "task-lifecycle")
+		spanCtx := span.SpanContext()
+
 		newTask := a2a.Task{
 			ID: taskID,
 			Status: a2a.NewTaskStatus(a2a.TaskStateSubmitted,
@@ -306,13 +325,20 @@ func handleMCPToolsCall(msg ACPMessage, myAgentID string, outbound chan []byte) 
 				"targetAgent":    targetAgent,
 				"tool_name":      toolName,
 				"requestPayload": string(reqPayload),
+				"trace_id":       spanCtx.TraceID().String(),
+				"span_id":        spanCtx.SpanID().String(),
 			},
 		}
 		_, err := taskStore.CreateTask(newTask)
 		if err != nil {
 			log.Printf("[Harness] Failed to create task: %v", err)
+			span.End()
 			return
 		}
+
+		activeSpansMu.Lock()
+		activeSpans[taskID] = span
+		activeSpansMu.Unlock()
 
 		forward := ACPMessage{
 			JSONRPC: "2.0",
@@ -376,11 +402,37 @@ func handleTasksSendUpdate(msg ACPMessage) {
 		return
 	}
 
-	broadcastWS(map[string]interface{}{
-		"type":   "task_update",
-		"taskId": taskID,
-		"status": status,
-	})
+	// End OpenTelemetry span if task reached terminal state
+	if status.State == a2a.TaskStateCompleted || status.State == a2a.TaskStateFailed || status.State == a2a.TaskStateCanceled {
+		activeSpansMu.Lock()
+		if span, ok := activeSpans[taskID]; ok {
+			span.End()
+			delete(activeSpans, taskID)
+		}
+		activeSpansMu.Unlock()
+	}
+
+	// Build enriched task update with trace context, artifacts, and history
+	sm, _ = taskStore.GetTask(taskID)
+	task := sm.Task()
+	updatePayload := map[string]interface{}{
+		"type":      "task_update",
+		"taskId":    taskID,
+		"status":    status,
+		"traceId":   "",
+		"spanId":    "",
+		"artifacts": task.Artifacts,
+		"history":   sm.History(),
+	}
+	if meta := task.Metadata; meta != nil {
+		if tid, ok := meta["trace_id"].(string); ok {
+			updatePayload["traceId"] = tid
+		}
+		if sid, ok := meta["span_id"].(string); ok {
+			updatePayload["spanId"] = sid
+		}
+	}
+	broadcastWS(updatePayload)
 
 	if requester != "" && requester != msg.Sender {
 		resp := ACPMessage{
@@ -424,11 +476,25 @@ func forwardApproval(taskID, rawLine string) {
 
 func broadcastTaskToUI(taskID string) {
 	if sm, ok := taskStore.GetTask(taskID); ok {
-		broadcastWS(map[string]interface{}{
-			"type":   "task_update",
-			"taskId": taskID,
-			"status": sm.Task().Status,
-		})
+		task := sm.Task()
+		updatePayload := map[string]interface{}{
+			"type":      "task_update",
+			"taskId":    taskID,
+			"status":    task.Status,
+			"traceId":   "",
+			"spanId":    "",
+			"artifacts": task.Artifacts,
+			"history":   sm.History(),
+		}
+		if meta := task.Metadata; meta != nil {
+			if tid, ok := meta["trace_id"].(string); ok {
+				updatePayload["traceId"] = tid
+			}
+			if sid, ok := meta["span_id"].(string); ok {
+				updatePayload["spanId"] = sid
+			}
+		}
+		broadcastWS(updatePayload)
 	}
 }
 
@@ -442,6 +508,17 @@ func handleApprovalResponse(msg ACPMessage, rawLine string) {
 		log.Printf("[Harness] Approval transition failed: %v", err)
 		return
 	}
+
+	// End OpenTelemetry span if task reached terminal state
+	if newState == a2a.TaskStateFailed || newState == a2a.TaskStateCanceled {
+		activeSpansMu.Lock()
+		if span, ok := activeSpans[taskID]; ok {
+			span.End()
+			delete(activeSpans, taskID)
+		}
+		activeSpansMu.Unlock()
+	}
+
 	forwardApproval(taskID, rawLine)
 	broadcastTaskToUI(taskID)
 }
@@ -552,7 +629,22 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	b, _ := json.Marshal(stateUpdate)
 	conn.WriteMessage(websocket.TextMessage, b)
 
+	// Send active session histories to the client on connect
+	sessions := taskStore.ListSessions()
+	for _, sess := range sessions {
+		for _, msg := range sess.Messages {
+			msgUpdate := map[string]interface{}{
+				"type":       "session_update",
+				"session_id": sess.ID,
+				"message":    msg,
+			}
+			bm, _ := json.Marshal(msgUpdate)
+			conn.WriteMessage(websocket.TextMessage, bm)
+		}
+	}
+
 	handleWSIncoming(conn)
+
 
 	wsClientsMu.Lock()
 	delete(wsClients, conn)
