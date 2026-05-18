@@ -40,12 +40,14 @@ type HarnessState struct {
 	mu           sync.Mutex
 	agents       map[string]net.Conn
 	capabilities map[string][]string
+	tools        map[string]string // tool_name -> agent_id
 	wsClients    map[*websocket.Conn]bool
 }
 
 var state = &HarnessState{
 	agents:       make(map[string]net.Conn),
 	capabilities: make(map[string][]string),
+	tools:        make(map[string]string),
 	wsClients:    make(map[*websocket.Conn]bool),
 }
 
@@ -61,9 +63,24 @@ func broadcastWS(msg interface{}) {
 func broadcastState() {
 	state.mu.Lock()
 	defer state.mu.Unlock()
+	
+	agentInfo := make(map[string]map[string]interface{})
+	for id, caps := range state.capabilities {
+		agentInfo[id] = map[string]interface{}{
+			"capabilities": caps,
+			"tools":        []string{},
+		}
+	}
+	for toolName, agentID := range state.tools {
+		if info, ok := agentInfo[agentID]; ok {
+			toolsList := info["tools"].([]string)
+			info["tools"] = append(toolsList, toolName)
+		}
+	}
+
 	msg := map[string]interface{}{
 		"type":   "state_update",
-		"agents": state.capabilities,
+		"agents": agentInfo,
 	}
 	b, _ := json.Marshal(msg)
 	for client := range state.wsClients {
@@ -94,6 +111,18 @@ func handleUDSConnection(conn net.Conn) {
 			state.mu.Lock()
 			state.agents[myAgentID] = conn
 			state.capabilities[myAgentID] = caps
+			
+			// Register MCP Tools
+			if rawTools, ok := msg.Params["tools"].([]interface{}); ok {
+				for _, t := range rawTools {
+					if tMap, ok := t.(map[string]interface{}); ok {
+						if toolName, ok := tMap["name"].(string); ok {
+							state.tools[toolName] = myAgentID
+						}
+					}
+				}
+			}
+
 			state.mu.Unlock()
 			
 			broadcastWS(map[string]interface{}{
@@ -102,6 +131,59 @@ func handleUDSConnection(conn net.Conn) {
 				"message": fmt.Sprintf("Agent %s discovered.", myAgentID),
 			})
 			broadcastState()
+		} else if msg.Method == "mcp/tools/list" && msg.Target == "harness" {
+			state.mu.Lock()
+			var toolList []string
+			for t := range state.tools {
+				toolList = append(toolList, t)
+			}
+			state.mu.Unlock()
+			
+			resp := ACPMessage{
+				JSONRPC: "2.0",
+				Method:  "mcp/tools/list/response",
+				Sender:  "harness",
+				Target:  myAgentID,
+				Params: map[string]interface{}{
+					"tools": toolList,
+				},
+			}
+			b, _ := json.Marshal(resp)
+			conn.Write(append(b, '\n'))
+		} else if msg.Method == "mcp/tools/call" && msg.Target == "harness" {
+			toolName, _ := msg.Params["tool_name"].(string)
+			state.mu.Lock()
+			targetAgent, exists := state.tools[toolName]
+			state.mu.Unlock()
+			
+			broadcastWS(map[string]interface{}{
+				"type": "acp_trace",
+				"data": msg,
+			})
+			
+			if exists {
+				msg.Target = targetAgent
+				state.mu.Lock()
+				targetConn, tExists := state.agents[targetAgent]
+				state.mu.Unlock()
+				if tExists {
+					b, _ := json.Marshal(msg)
+					targetConn.Write(append(b, '\n'))
+				}
+			} else {
+				resp := ACPMessage{
+					JSONRPC: "2.0",
+					Method:  "mcp/tools/call/response",
+					Sender:  "harness",
+					Target:  msg.Sender,
+					Params: map[string]interface{}{
+						"status": "error",
+						"result": "Tool not found: " + toolName,
+					},
+				}
+				b, _ := json.Marshal(resp)
+				conn.Write(append(b, '\n'))
+			}
 		} else {
 			broadcastWS(map[string]interface{}{
 				"type": "acp_trace",
@@ -122,6 +204,11 @@ func handleUDSConnection(conn net.Conn) {
 		state.mu.Lock()
 		delete(state.agents, myAgentID)
 		delete(state.capabilities, myAgentID)
+		for k, v := range state.tools {
+			if v == myAgentID {
+				delete(state.tools, k)
+			}
+		}
 		state.mu.Unlock()
 		broadcastState()
 		broadcastWS(map[string]interface{}{
@@ -152,11 +239,23 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	state.mu.Lock()
 	state.wsClients[conn] = true
-	capsCopy := make(map[string][]string)
-	for k, v := range state.capabilities { capsCopy[k] = v }
+	
+	agentInfo := make(map[string]map[string]interface{})
+	for id, caps := range state.capabilities {
+		agentInfo[id] = map[string]interface{}{
+			"capabilities": caps,
+			"tools":        []string{},
+		}
+	}
+	for toolName, agentID := range state.tools {
+		if info, ok := agentInfo[agentID]; ok {
+			toolsList := info["tools"].([]string)
+			info["tools"] = append(toolsList, toolName)
+		}
+	}
 	state.mu.Unlock()
 
-	conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf(`{"type":"state_update","agents":%s}`, toJSON(capsCopy))))
+	conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf(`{"type":"state_update","agents":%s}`, toJSON(agentInfo))))
 
 	for {
 		_, p, err := conn.ReadMessage()

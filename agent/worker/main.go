@@ -54,6 +54,9 @@ func main() {
 		Sender:  agentID,
 		Params: map[string]interface{}{
 			"capabilities": capabilities,
+			"tools": []map[string]interface{}{
+				{"name": "execute_shell", "description": "Execute a shell command on the host"},
+			},
 		},
 	}
 	b, _ := json.Marshal(regMsg)
@@ -69,10 +72,11 @@ func main() {
 		var msg ACPMessage
 		if err := json.Unmarshal([]byte(line), &msg); err == nil {
 			
-			if msg.Method == "execute_task" {
-				command, ok := msg.Params["command"].(string)
-				if ok {
-					fmt.Printf("\033[36m[Worker %s]\033[0m Received task from %s: %s\n", agentID, msg.Sender, command)
+			if msg.Method == "mcp/tools/call" {
+				toolName, ok := msg.Params["tool_name"].(string)
+				if ok && toolName == "execute_shell" {
+					command, _ := msg.Params["command"].(string)
+					fmt.Printf("\033[36m[Worker %s]\033[0m Received MCP call from %s for %s: %s\n", agentID, msg.Sender, toolName, command)
 					
 					// Store pending command
 					pendingCommand = command
@@ -110,13 +114,13 @@ func main() {
 						resStatus := "success"
 						resOutput := string(output)
 						if err != nil {
-							resStatus = "failed"
+							resStatus = "error"
 							resOutput += "\nError: " + err.Error()
 						}
 
 						resMsg := ACPMessage{
 							JSONRPC: "2.0",
-							Method:  "task_result",
+							Method:  "mcp/tools/call/response",
 							Sender:  agentID,
 							Target:  pendingRequester,
 							Params: map[string]interface{}{
@@ -132,12 +136,12 @@ func main() {
 						fmt.Printf("\033[31m[Worker %s]\033[0m Command rejected by user.\n", agentID)
 						resMsg := ACPMessage{
 							JSONRPC: "2.0",
-							Method:  "task_result",
+							Method:  "mcp/tools/call/response",
 							Sender:  agentID,
 							Target:  pendingRequester,
 							Params: map[string]interface{}{
 								"task_id": pendingTaskID,
-								"status": "failed",
+								"status": "error",
 								"result": "Execution rejected by user.",
 							},
 						}

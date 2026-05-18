@@ -102,7 +102,7 @@
             const el = document.createElement('div');
             el.className = 'log-entry';
             const time = new Date().toLocaleTimeString();
-            el.innerHTML = \`[\${time}] <strong style="color:\${color}">[\${source}]</strong> \${message}\`;
+            el.innerHTML = `[${time}] <strong style="color:${color}">[${source}]</strong> ${message}`;
             logsDiv.appendChild(el);
             logsDiv.scrollTop = logsDiv.scrollHeight;
         }
@@ -113,8 +113,10 @@
             nodes.remove(nodeIds);
             edges.clear();
 
-            for (const [id, caps] of Object.entries(activeAgents)) {
-                nodes.add({ id: id, label: \`\${id}\\n[\${caps.join(',')}]\`, color: '#5ce1e6' });
+            for (const [id, info] of Object.entries(activeAgents)) {
+                let capsStr = info.capabilities ? info.capabilities.join(',') : '';
+                let toolsStr = info.tools && info.tools.length > 0 ? '\nTools: ' + info.tools.join(',') : '';
+                nodes.add({ id: id, label: `${id}\n[${capsStr}]${toolsStr}`, color: '#5ce1e6' });
                 edges.add({ from: id, to: 'harness' });
             }
         }
@@ -127,7 +129,7 @@
                 appendLog('#4ade80', 'Harness', 'Topology graph updated.');
             } else if (msg.type === "acp_trace") {
                 const trace = msg.data;
-                appendLog('#60a5fa', 'ACP', \`\${trace.sender} \u2192 \${trace.target || '*'}: <strong>\${trace.method}</strong>\`);
+                appendLog('#60a5fa', 'ACP', `${trace.sender} \u2192 ${trace.target || '*'}: <strong>${trace.method}</strong>`);
                 
                 // Show trace on graph
                 if (trace.target && nodes.get(trace.target) && nodes.get(trace.sender)) {
@@ -196,7 +198,7 @@
                     params: { command: text }
                 };
                 ws.send(JSON.stringify(acpMsg));
-                appendLog('#e74c3c', 'UI', \`Injected command: \${text}\`);
+                appendLog('#e74c3c', 'UI', `Injected command: ${text}`);
                 input.value = '';
             }
         };
