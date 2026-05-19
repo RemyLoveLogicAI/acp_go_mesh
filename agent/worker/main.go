@@ -155,7 +155,8 @@ func main() {
 			}
 
 		case "tasks/cancel":
-			taskID, _ := params["task_id"].(string)
+			cancelParams := getEnvelopeParams(env)
+			taskID, _ := cancelParams["task_id"].(string)
 			if taskID == "" {
 				continue
 			}
@@ -165,8 +166,9 @@ func main() {
 			}
 
 		case "approval_response":
-			taskID, _ := params["task_id"].(string)
-			approvalStatus, _ := params["status"].(string)
+			approvalParams := getEnvelopeParams(env)
+			taskID, _ := approvalParams["task_id"].(string)
+			approvalStatus, _ := approvalParams["status"].(string)
 
 			val, ok := taskCtxs.Load(taskID)
 			if !ok {

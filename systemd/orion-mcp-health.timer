@@ -1,0 +1,12 @@
+[Unit]
+Description=ORION MCP health polling timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Persistent=true
+Unit=orion-mcp-health@%u.service
+
+[Install]
+WantedBy=timers.target

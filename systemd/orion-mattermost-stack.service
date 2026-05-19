@@ -1,0 +1,16 @@
+[Unit]
+Description=ORION Mattermost stack
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h/Documents/01-Active-Projects/acp_go_mesh/deploy/mattermost
+ExecStart=/usr/bin/env sh -lc 'podman compose up -d'
+ExecStop=/usr/bin/env sh -lc 'podman compose down'
+TimeoutStartSec=180
+TimeoutStopSec=90
+
+[Install]
+WantedBy=default.target

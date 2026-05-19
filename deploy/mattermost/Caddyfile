@@ -1,0 +1,27 @@
+# ORION Nexus v3.7 - Mattermost via Caddy
+# Testing URL: http://localhost:8065
+# Production URL: https://chat.yourdomain.com
+
+chat.yourdomain.com {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    reverse_proxy 127.0.0.1:8065 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
+
+    log {
+        output file /var/log/caddy/mattermost-access.log
+        format console
+    }
+}

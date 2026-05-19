@@ -1,0 +1,16 @@
+[Unit]
+Description=ORION Zo warm-pool guard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+Environment=INTERVAL=120
+Environment=SSH_TIMEOUT=5
+ExecStart=%h/Documents/01-Active-Projects/acp_go_mesh/scripts/zo_warm_pool.sh 100.73.154.25 2288
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

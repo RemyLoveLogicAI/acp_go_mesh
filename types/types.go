@@ -14,18 +14,17 @@ import (
 // These aliases allow existing code to use types.XXX while migrating.
 
 type (
-	AgentCard    = a2a.AgentCard
-	AgentSkill   = a2a.AgentSkill
-	TaskState    = a2a.TaskState
-	Task         = a2a.Task
-	TaskStatus   = a2a.TaskStatus
-	A2AEnvelope  = a2a.A2AEnvelope
-	ACPMessage   = a2a.ACPMessage // Deprecated: use A2AEnvelope
-	TaskUpdate   = a2a.TaskUpdate
-	Session      = a2a.Session
-	Message      = a2a.Message
-	Part         = a2a.Part
-	Artifact     = a2a.Artifact
+	AgentCard   = a2a.AgentCard
+	AgentSkill  = a2a.AgentSkill
+	TaskState   = a2a.TaskState
+	Task        = a2a.Task
+	TaskStatus  = a2a.TaskStatus
+	A2AEnvelope = a2a.A2AEnvelope
+	TaskUpdate  = a2a.TaskUpdate
+	Session     = a2a.Session
+	Message     = a2a.Message
+	Part        = a2a.Part
+	Artifact    = a2a.Artifact
 )
 
 // Re-export task state constants for backward compatibility.

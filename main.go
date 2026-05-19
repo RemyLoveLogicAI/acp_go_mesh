@@ -26,9 +26,6 @@ import (
 	"acp-mesh/pkg/harness"
 )
 
-// Message type used throughout the system (migrating to A2A)
-type Message = a2a.A2AEnvelope
-
 //go:embed ui/index.html
 var uiFiles embed.FS
 
@@ -44,6 +41,16 @@ var (
 		},
 	}
 )
+
+// getEnvelopeParams extracts params from A2AEnvelope Payload
+func getEnvelopeParams(env a2a.A2AEnvelope) map[string]interface{} {
+	params := make(map[string]interface{})
+	if len(env.Payload) == 0 {
+		return params
+	}
+	_ = json.Unmarshal(env.Payload, &params)
+	return params
+}
 
 // MessagePresenter handles transformation of raw wire messages into displayable UI text representations.
 type MessagePresenter struct{}
@@ -177,9 +184,7 @@ func handleUDSConnection(conn net.Conn) {
 		if err := json.Unmarshal([]byte(line), &env); err != nil {
 			continue
 		}
-		// Convert A2AEnvelope to ACPMessage for backward compatibility during migration
-		msg := env.ToACPMessage()
-		dispatchMessage(msg, line, conn, &myAgentID, outbound)
+		dispatchMessage(env, line, conn, &myAgentID, outbound)
 	}
 	if err := scanner.Err(); err != nil {
 		log.Printf("[Harness] Scanner error: %v", err)
@@ -205,8 +210,10 @@ func recordSessionMessage(msg a2a.ACPMessage) {
 	}
 }
 
-func dispatchMessage(msg a2a.ACPMessage, rawLine string, conn net.Conn, agentID *string, outbound chan []byte) {
+func dispatchMessage(env a2a.A2AEnvelope, rawLine string, conn net.Conn, agentID *string, outbound chan []byte) {
 	myAgentID := *agentID
+	// Convert to ACPMessage for now for backward compatibility
+	msg := env.ToACPMessage()
 	recordSessionMessage(msg)
 	switch msg.Method {
 	case "register":

@@ -1,0 +1,15 @@
+[Unit]
+Description=ORION MCP health poller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+Environment=INTERVAL=900
+ExecStart=%h/Documents/01-Active-Projects/acp_go_mesh/scripts/orion_mcp_health_poll.sh
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target

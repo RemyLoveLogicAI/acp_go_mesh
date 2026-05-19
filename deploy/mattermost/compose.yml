@@ -1,0 +1,80 @@
+version: '3.9'
+services:
+  mattermost:
+    image: docker.io/mattermost/mattermost-team-edition:latest
+    container_name: orion-mattermost
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8065:8065"
+    env_file:
+      - .env
+    environment:
+      MM_SERVICESETTINGS_SITEURL: "${MM_SITE_URL}"
+      MM_SERVICESETTINGS_LISTENADDRESS: "${MM_LISTEN_ADDRESS}"
+      MM_SQLSETTINGS_DRIVERNAME: "postgres"
+      MM_SQLSETTINGS_DATASOURCE: "${MM_DB_DSN}"
+      MM_LOGSETTINGS_ENABLECONSOLE: "true"
+      MM_PLUGINSETTINGS_ENABLEUPLOADS: "true"
+      MM_FILESETTINGS_DRIVERNAME: "local"
+      MM_FILESETTINGS_DIRECTORY: "/mattermost/data"
+    volumes:
+      - mattermost_config:/mattermost/config:Z
+      - mattermost_data:/mattermost/data:Z
+      - mattermost_logs:/mattermost/logs:Z
+      - mattermost_plugins:/mattermost/plugins:Z
+      - mattermost_client_plugins:/mattermost/client/plugins:Z
+      - mattermost_bleve:/mattermost/bleve-indexes:Z
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8065/api/v4/system/ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  postgres:
+    image: docker.io/postgres:16-alpine
+    container_name: orion-mattermost-postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: "${MM_PG_DB}"
+      POSTGRES_USER: "${MM_PG_USER}"
+      POSTGRES_PASSWORD: "${MM_PG_PASSWORD}"
+    volumes:
+      - mattermost_postgres:/var/lib/postgresql/data:Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MM_PG_USER} -d ${MM_PG_DB}"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  caddy:
+    image: docker.io/caddy:2
+    container_name: orion-mattermost-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro,Z
+      - caddy_data:/data:Z
+      - caddy_config:/config:Z
+    depends_on:
+      mattermost:
+        condition: service_healthy
+
+volumes:
+  mattermost_config:
+  mattermost_data:
+  mattermost_logs:
+  mattermost_plugins:
+  mattermost_client_plugins:
+  mattermost_bleve:
+  mattermost_postgres:
+  caddy_data:
+  caddy_config:
