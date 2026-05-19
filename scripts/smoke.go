@@ -12,8 +12,7 @@ import (
 	"acp-mesh/pkg/a2a"
 )
 
-// Type aliases for A2A migration
-type ACPMessage = a2a.ACPMessage
+// Type alias for A2A migration
 type A2AEnvelope = a2a.A2AEnvelope
 
 func main() {

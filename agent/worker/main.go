@@ -17,7 +17,7 @@ import (
 	"acp-mesh/pkg/a2a"
 )
 
-type ACPMessage = a2a.ACPMessage
+// A2AEnvelope is the canonical wire format for agent-to-agent communication.
 type A2AEnvelope = a2a.A2AEnvelope
 
 func getEnvelopeParams(msg A2AEnvelope) map[string]interface{} {
@@ -105,55 +105,57 @@ func main() {
 		if err := json.Unmarshal([]byte(line), &env); err != nil {
 			continue
 		}
-		// Convert A2AEnvelope to ACPMessage to access Params and SessionID
-		msg := env.ToACPMessage()
+		// Extract params from envelope payload
+		params := getEnvelopeParams(env)
 
-		switch msg.Method {
+		switch env.Method {
 		case "mcp/tools/call":
-			toolName, ok := msg.Params["tool_name"].(string)
+			toolName, ok := params["tool_name"].(string)
 			if ok && toolName == "execute_shell" {
-				command, _ := msg.Params["command"].(string)
-				taskID, _ := msg.Params["task_id"].(string)
-				requester, _ := msg.Params["requester"].(string)
+				command, _ := params["command"].(string)
+				taskID, _ := params["task_id"].(string)
+				requester, _ := params["requester"].(string)
 
-				fmt.Printf("\033[36m[Worker %s]\033[0m Received MCP call (task %s) from %s: %s\n", agentID, taskID, msg.Sender, command)
+				fmt.Printf("\033[36m[Worker %s]\033[0m Received MCP call (task %s) from %s: %s\n", agentID, taskID, env.Sender, command)
 
 				// Store context so we can resume after approval
 				taskCtxs.Store(taskID, taskContext{
 					TaskID:    taskID,
 					Command:   command,
 					Requester: requester,
-					SessionID: msg.SessionID,
+					SessionID: env.SessionID,
 				})
 				// Create cancel channel for this task
 				cancelChans.Store(taskID, make(chan struct{}))
 
 				// Transition task to input-required (approval needed)
 				// Do NOT block. The worker continues listening.
-				updateMsg := ACPMessage{
+				updatePayload, _ := json.Marshal(map[string]interface{}{
+					"task_id": taskID,
+					"status": a2a.TaskStatus{
+						State:     a2a.TaskStateInputRequired,
+						Message:   fmt.Sprintf("Approval required for: %s", command),
+						Timestamp: a2a.NewTaskStatus(a2a.TaskStateInputRequired, "").Timestamp,
+					},
+				})
+				updateEnv := A2AEnvelope{
 					JSONRPC:   "2.0",
 					Method:    "tasks/sendUpdate",
 					Sender:    agentID,
 					Target:    "harness",
-					SessionID: msg.SessionID,
-					Params: map[string]interface{}{
-						"task_id": taskID,
-						"status": a2a.TaskStatus{
-							State:     a2a.TaskStateInputRequired,
-							Message:   fmt.Sprintf("Approval required for: %s", command),
-							Timestamp: a2a.NewTaskStatus(a2a.TaskStateInputRequired, "").Timestamp,
-						},
-					},
+					TaskID:    taskID,
+					SessionID: env.SessionID,
+					Payload:   updatePayload,
 				}
 
-				ub, _ := json.Marshal(updateMsg)
+				ub, _ := json.Marshal(updateEnv)
 				conn.Write(append(ub, '\n'))
 
 				fmt.Printf("\033[36m[Worker %s]\033[0m Task %s awaiting approval (input-required). Worker continues listening.\n", agentID, taskID)
 			}
 
 		case "tasks/cancel":
-			taskID, _ := msg.Params["task_id"].(string)
+			taskID, _ := params["task_id"].(string)
 			if taskID == "" {
 				continue
 			}
@@ -163,8 +165,8 @@ func main() {
 			}
 
 		case "approval_response":
-			taskID, _ := msg.Params["task_id"].(string)
-			approvalStatus, _ := msg.Params["status"].(string)
+			taskID, _ := params["task_id"].(string)
+			approvalStatus, _ := params["status"].(string)
 
 			val, ok := taskCtxs.Load(taskID)
 			if !ok {
@@ -177,22 +179,24 @@ func main() {
 				fmt.Printf("\033[36m[Worker %s]\033[0m Task %s approved. Executing: %s\n", agentID, taskID, ctx.Command)
 
 				// Transition to working
-				workingMsg := ACPMessage{
+				workingPayload, _ := json.Marshal(map[string]interface{}{
+					"task_id": taskID,
+					"status": a2a.TaskStatus{
+						State:     a2a.TaskStateWorking,
+						Message:   "Executing shell command",
+						Timestamp: a2a.NewTaskStatus(a2a.TaskStateWorking, "").Timestamp,
+					},
+				})
+				workingEnv := A2AEnvelope{
 					JSONRPC:   "2.0",
 					Method:    "tasks/sendUpdate",
 					Sender:    agentID,
 					Target:    "harness",
+					TaskID:    taskID,
 					SessionID: ctx.SessionID,
-					Params: map[string]interface{}{
-						"task_id": taskID,
-						"status": a2a.TaskStatus{
-							State:     a2a.TaskStateWorking,
-							Message:   "Executing shell command",
-							Timestamp: a2a.NewTaskStatus(a2a.TaskStateWorking, "").Timestamp,
-						},
-					},
+					Payload:   workingPayload,
 				}
-				wb, _ := json.Marshal(workingMsg)
+				wb, _ := json.Marshal(workingEnv)
 				conn.Write(append(wb, '\n'))
 
 				// Execute shell command with cancellation support
@@ -240,30 +244,32 @@ func main() {
 				}
 
 				// Transition to completed or failed
-				finalMsg := ACPMessage{
+				finalPayload, _ := json.Marshal(map[string]interface{}{
+					"task_id": taskID,
+					"status": a2a.TaskStatus{
+						State:     resStatus,
+						Message:   "Execution finished",
+						Timestamp: a2a.NewTaskStatus(resStatus, "").Timestamp,
+					},
+					"artifact": a2a.Artifact{
+						Name:  "shell_output",
+						Parts: []a2a.Part{a2a.NewTextPart(resOutput)},
+						Metadata: map[string]interface{}{
+							"exit_ok": err == nil,
+							"command": ctx.Command,
+						},
+					},
+				})
+				finalEnv := A2AEnvelope{
 					JSONRPC:   "2.0",
 					Method:    "tasks/sendUpdate",
 					Sender:    agentID,
 					Target:    "harness",
+					TaskID:    taskID,
 					SessionID: ctx.SessionID,
-					Params: map[string]interface{}{
-						"task_id": taskID,
-						"status": a2a.TaskStatus{
-							State:     resStatus,
-							Message:   "Execution finished",
-							Timestamp: a2a.NewTaskStatus(resStatus, "").Timestamp,
-						},
-						"artifact": a2a.Artifact{
-							Name:  "shell_output",
-							Parts: []a2a.Part{a2a.NewTextPart(resOutput)},
-							Metadata: map[string]interface{}{
-								"exit_ok": err == nil,
-								"command": ctx.Command,
-							},
-						},
-					},
+					Payload:   finalPayload,
 				}
-				fb, _ := json.Marshal(finalMsg)
+				fb, _ := json.Marshal(finalEnv)
 				conn.Write(append(fb, '\n'))
 
 				// Also send MCP response to requester
@@ -272,19 +278,21 @@ func main() {
 					if resStatus == a2a.TaskStateFailed {
 						mcpStatus = "error"
 					}
-					resp := ACPMessage{
+					mcpPayload, _ := json.Marshal(map[string]interface{}{
+						"task_id": taskID,
+						"status":  mcpStatus,
+						"result":  resOutput,
+					})
+					respEnv := A2AEnvelope{
 						JSONRPC:   "2.0",
 						Method:    "mcp/tools/call/response",
 						Sender:    agentID,
 						Target:    ctx.Requester,
+						TaskID:    taskID,
 						SessionID: ctx.SessionID,
-						Params: map[string]interface{}{
-							"task_id": taskID,
-							"status":  mcpStatus,
-							"result":  resOutput,
-						},
+						Payload:   mcpPayload,
 					}
-					rb, _ := json.Marshal(resp)
+					rb, _ := json.Marshal(respEnv)
 					conn.Write(append(rb, '\n'))
 				}
 
@@ -294,38 +302,41 @@ func main() {
 				fmt.Printf("\033[31m[Worker %s]\033[0m Task %s rejected by user.\n", agentID, taskID)
 
 				// Transition to failed (rejected)
-				rejectMsg := ACPMessage{
+				rejectPayload, _ := json.Marshal(map[string]interface{}{
+					"task_id": taskID,
+					"status": a2a.TaskStatus{
+						State:     a2a.TaskStateFailed,
+						Message:   "Execution rejected by user",
+						Timestamp: a2a.NewTaskStatus(a2a.TaskStateFailed, "").Timestamp,
+					},
+				})
+				rejectEnv := A2AEnvelope{
 					JSONRPC:   "2.0",
 					Method:    "tasks/sendUpdate",
 					Sender:    agentID,
 					Target:    "harness",
+					TaskID:    taskID,
 					SessionID: ctx.SessionID,
-					Params: map[string]interface{}{
-						"task_id": taskID,
-						"status": a2a.TaskStatus{
-							State:     a2a.TaskStateFailed,
-							Message:   "Execution rejected by user",
-							Timestamp: a2a.NewTaskStatus(a2a.TaskStateFailed, "").Timestamp,
-						},
-					},
+					Payload:   rejectPayload,
 				}
-				jb, _ := json.Marshal(rejectMsg)
+				jb, _ := json.Marshal(rejectEnv)
 				conn.Write(append(jb, '\n'))
 
 				// MCP response to requester
 				if ctx.Requester != "" {
-					resp := ACPMessage{
+					mcpPayload, _ := json.Marshal(map[string]interface{}{
+						"task_id": taskID,
+						"status":  "error",
+						"result":  "Execution rejected by user.",
+					})
+					respEnv := A2AEnvelope{
 						JSONRPC: "2.0",
 						Method:  "mcp/tools/call/response",
 						Sender:  agentID,
 						Target:  ctx.Requester,
-						Params: map[string]interface{}{
-							"task_id": taskID,
-							"status":  "error",
-							"result":  "Execution rejected by user.",
-						},
+						Payload: mcpPayload,
 					}
-					rb, _ := json.Marshal(resp)
+					rb, _ := json.Marshal(respEnv)
 					conn.Write(append(rb, '\n'))
 				}
 			}
